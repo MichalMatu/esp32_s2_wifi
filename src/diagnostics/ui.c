@@ -101,9 +101,9 @@ static void draw_connect(void)
 {
     diag_oled_draw_text(0, 0, "CONNECT");
     diag_oled_draw_text(1, 0, "SCAN NETWORKS");
-    diag_oled_draw_text(2, 0, "PASSWORD EDIT");
-    diag_oled_draw_text(3, 0, "SAVE+CONNECT");
-    diag_oled_draw_text(4, 0, "STATUS:TODO");
+    diag_oled_draw_text(2, 0, "PASSWORD:WEB");
+    diag_oled_draw_text(3, 0, "SAVE:WEB ONLY");
+    diag_oled_draw_text(4, 0, "OLED EDIT:LATER");
     diag_oled_draw_text(6, 0, "WEB:wifi.settings");
 }
 
@@ -172,9 +172,9 @@ static void draw_config(void)
     diag_oled_draw_text(0, 0, "CONFIG");
     diag_oled_draw_text(1, 0, "PORTAL:wifi.set");
     diag_oled_draw_text(2, 0, "STA IP:DHCP");
-    diag_oled_draw_text(3, 0, "AP IP:TODO");
-    diag_oled_draw_text(4, 0, "NAME:TODO");
-    diag_oled_draw_text(5, 0, "BRIGHT:TODO");
+    diag_oled_draw_text(3, 0, "AP IP:CONFIG");
+    diag_oled_draw_text(4, 0, "NAME:DEFAULT");
+    diag_oled_draw_text(5, 0, "BRIGHT:FIXED");
     snprintf(line, sizeof(line), "OLED I2C:%d/%d",
              CONFIG_DIAG_OLED_SDA_GPIO, CONFIG_DIAG_OLED_SCL_GPIO);
     diag_oled_draw_text(6, 0, line);
@@ -188,7 +188,7 @@ static void draw_actions(void)
     diag_oled_draw_text(3, 0, "RESTART ESP");
     diag_oled_draw_text(4, 0, "BOOTLOADER");
     diag_oled_draw_text(5, 0, "RESET WIFI CFG");
-    diag_oled_draw_text(6, 0, "STATUS:TODO");
+    diag_oled_draw_text(6, 0, "FACTORY RESET");
 }
 
 static void draw_about(void)
@@ -224,6 +224,38 @@ static void draw_message(const char *title, const char *line1, const char *line2
     }
     if (line3) {
         diag_oled_draw_text(5, 0, line3);
+    }
+}
+
+static void draw_scan_results(const diag_state_t *state, const char *title)
+{
+    char line[32];
+
+    diag_oled_draw_text(0, 0, title);
+    if (state->wifi_scan_running) {
+        diag_oled_draw_text(2, 0, "SCANNING...");
+        return;
+    }
+    if (state->wifi_scan_error != 0) {
+        snprintf(line, sizeof(line), "SCAN ERR:%d", state->wifi_scan_error);
+        diag_oled_draw_text(2, 0, line);
+        diag_oled_draw_text(4, 0, "OK RESCAN");
+        return;
+    }
+    if (state->wifi_scan_count == 0) {
+        diag_oled_draw_text(2, 0, "NO RESULTS YET");
+        diag_oled_draw_text(4, 0, "OK SCAN");
+        return;
+    }
+
+    snprintf(line, sizeof(line), "FOUND:%u/%u", state->wifi_scan_count, state->wifi_scan_total);
+    diag_oled_draw_text(1, 0, line);
+    for (uint16_t i = 0; i < state->wifi_scan_count; i++) {
+        snprintf(line, sizeof(line), "%d CH%u %.10s",
+                 state->wifi_scan_results[i].rssi,
+                 state->wifi_scan_results[i].channel,
+                 state->wifi_scan_results[i].ssid[0] ? state->wifi_scan_results[i].ssid : "<HIDDEN>");
+        diag_oled_draw_text(i + 2, 0, line);
     }
 }
 
@@ -268,10 +300,11 @@ static void draw_wifi_detail(const diag_state_t *state, const diag_input_state_t
 {
     wifi_config_t cfg = {};
     char line[32];
+    bool armed = input->action_confirm_armed;
 
     switch (input->detail_index) {
     case 1:
-        draw_message("SCAN NETWORKS", "SCAN ENGINE:TODO", "WILL PAUSE WIFI", "USE WEB FOR NOW");
+        draw_scan_results(state, "SCAN NETWORKS");
         break;
     case 2:
         diag_oled_draw_text(0, 0, "SAVED NETWORK");
@@ -285,10 +318,10 @@ static void draw_wifi_detail(const diag_state_t *state, const diag_input_state_t
         }
         break;
     case 3:
-        draw_message("RECONNECT", "ACTION:TODO", "SAFE CONFIRM NEXT", NULL);
+        draw_message("RECONNECT", "OK RUN", "NO RESTART", NULL);
         break;
     case 4:
-        draw_message("FORGET NETWORK", "ACTION:TODO", "CONFIRM REQUIRED", NULL);
+        draw_message("FORGET NETWORK", armed ? "OK AGAIN:RESET" : "OK ARM RESET", "THEN CONFIG MODE", NULL);
         break;
     default:
         draw_wifi(state);
@@ -296,20 +329,20 @@ static void draw_wifi_detail(const diag_state_t *state, const diag_input_state_t
     }
 }
 
-static void draw_connect_detail(const diag_input_state_t *input)
+static void draw_connect_detail(const diag_state_t *state, const diag_input_state_t *input)
 {
     switch (input->detail_index) {
     case 0:
-        draw_message("SELECT SSID", "SCAN LIST:TODO", "ENC PICK NETWORK", NULL);
+        draw_scan_results(state, "SELECT SSID");
         break;
     case 1:
-        draw_message("ENTER PASSWORD", "TEXT EDIT:TODO", "ENC CHAR PICK", "OK NEXT");
+        draw_message("ENTER PASSWORD", "OLED EDIT:LATER", "USE WIFI.SETTINGS", NULL);
         break;
     case 2:
-        draw_message("SAVE+CONNECT", "ACTION:TODO", "NEEDS SSID/PASS", NULL);
+        draw_message("SAVE+CONNECT", "WEB ONLY NOW", "wifi.settings", NULL);
         break;
     default:
-        draw_message("CONNECT ONCE", "ACTION:TODO", "NO SAVE MODE", NULL);
+        draw_message("CONNECT ONCE", "WEB ONLY NOW", "NO OLED PASS YET", NULL);
         break;
     }
 }
@@ -327,7 +360,10 @@ static void draw_bridge_detail(const diag_state_t *state, const diag_input_state
         draw_message("DNS/GATEWAY", "FROM ROUTER", "VISIBLE ON MAC", NULL);
         break;
     case 4:
-        draw_message("RESTART BRIDGE", "ACTION:TODO", "CONFIRM REQUIRED", NULL);
+        draw_message("RESTART BRIDGE",
+                     input->action_confirm_armed ? "OK AGAIN:REBOOT" : "OK ARM REBOOT",
+                     "USB WILL DROP",
+                     NULL);
         break;
     default:
         draw_bridge(state);
@@ -406,7 +442,7 @@ static void draw_diagnostics_detail(const diag_state_t *state, const diag_input_
         diag_oled_draw_text(2, 0, line);
         break;
     case 4:
-        draw_message("LAST ERROR", "LOG BUFFER:TODO", "SERIAL FOR NOW", NULL);
+        draw_message("LAST ERROR", "LOG:SERIAL NOW", "OLED BUFFER:LATER", NULL);
         break;
     case 5:
         diag_oled_draw_text(0, 0, "INPUT TEST");
@@ -431,22 +467,25 @@ static void draw_config_detail(const diag_input_state_t *input)
 {
     switch (input->detail_index) {
     case 0:
-        draw_message("CONFIG PORTAL", "URL:wifi.settings", "BOOT HOLD:2S", NULL);
+        draw_message("CONFIG PORTAL",
+                     input->action_confirm_armed ? "OK AGAIN:RESET" : "OK ARM RESET",
+                     "THEN WIFI.SET",
+                     NULL);
         break;
     case 1:
-        draw_message("STA IP MODE", "CURRENT:DHCP", "STATIC:TODO", NULL);
+        draw_message("STA IP MODE", "CURRENT:DHCP", "STATIC:LATER", NULL);
         break;
     case 2:
-        draw_message("AP IP MODE", "CONFIG MODE", "CUSTOM IP:TODO", NULL);
+        draw_message("AP IP MODE", "CONFIG PORTAL", "USB LOCAL ONLY", NULL);
         break;
     case 3:
-        draw_message("DEVICE NAME", "HOSTNAME:TODO", "OLED LABEL:TODO", NULL);
+        draw_message("DEVICE NAME", "USB:ESPRESSIF", "CUSTOM:LATER", NULL);
         break;
     case 4:
-        draw_message("OLED BRIGHT", "CONTRAST:TODO", "DIMMER:TODO", NULL);
+        draw_message("OLED BRIGHT", "FIXED CONTRAST", "DIMMER:LATER", NULL);
         break;
     default:
-        draw_message("SCREEN TIMEOUT", "TIMEOUT:TODO", "ALWAYS ON NOW", NULL);
+        draw_message("SCREEN TIMEOUT", "ALWAYS ON NOW", "TIMEOUT:LATER", NULL);
         break;
     }
 }
@@ -457,10 +496,10 @@ static void draw_actions_detail(const diag_input_state_t *input)
 
     switch (input->detail_index) {
     case 0:
-        draw_message("RECONNECT WIFI", armed ? "OK AGAIN:RUN" : "OK ARM ACTION", "B CANCEL", NULL);
+        draw_message("RECONNECT WIFI", "OK RUN", "NO RESTART", NULL);
         break;
     case 1:
-        draw_message("RESTART BRIDGE", "ACTION:TODO", "SAFE STOP/START", NULL);
+        draw_message("RESTART BRIDGE", armed ? "OK AGAIN:REBOOT" : "OK ARM REBOOT", "USB WILL DROP", NULL);
         break;
     case 2:
         draw_message("RESTART ESP", armed ? "OK AGAIN:REBOOT" : "OK ARM ACTION", "B CANCEL", NULL);
@@ -469,10 +508,10 @@ static void draw_actions_detail(const diag_input_state_t *input)
         draw_message("BOOTLOADER", armed ? "OK AGAIN:USB DL" : "OK ARM ACTION", "UPLOAD WITHOUT BOOT", NULL);
         break;
     case 4:
-        draw_message("RESET WIFI CFG", "ACTION:TODO", "CONFIRM REQUIRED", NULL);
+        draw_message("RESET WIFI CFG", armed ? "OK AGAIN:RESET" : "OK ARM RESET", "THEN CONFIG MODE", NULL);
         break;
     default:
-        draw_message("FACTORY RESET", "ACTION:TODO", "CONFIRM REQUIRED", NULL);
+        draw_message("FACTORY RESET", armed ? "OK AGAIN:ERASE" : "OK ARM ERASE", "ERASE NVS", NULL);
         break;
     }
 }
@@ -725,7 +764,7 @@ bool diag_ui_render(const diag_state_t *state, const diag_input_state_t *input)
             draw_wifi_detail(state, input);
             break;
         case DIAG_SCREEN_CONNECT:
-            draw_connect_detail(input);
+            draw_connect_detail(state, input);
             break;
         case DIAG_SCREEN_BRIDGE:
             draw_bridge_detail(state, input);
@@ -749,7 +788,7 @@ bool diag_ui_render(const diag_state_t *state, const diag_input_state_t *input)
             draw_status_detail(state, input);
             break;
         }
-        diag_oled_draw_text(7, 0, "B BACK");
+        diag_oled_draw_text(7, 0, input->action_confirm_armed ? "OK RUN  B CANCEL" : "B BACK");
         return diag_oled_flush();
     }
 

@@ -148,29 +148,76 @@ static void select_menu_item(diag_input_state_t *state)
     mark_changed(state);
 }
 
-static diag_action_t action_from_detail_index(int detail_index)
+static diag_action_t action_from_detail(diag_screen_t screen, int detail_index)
 {
-    switch (detail_index) {
-    case 0:
-        return DIAG_ACTION_RECONNECT_WIFI;
-    case 2:
-        return DIAG_ACTION_RESTART_ESP;
-    case 3:
-        return DIAG_ACTION_BOOTLOADER;
+    switch (screen) {
+    case DIAG_SCREEN_WIFI:
+        switch (detail_index) {
+        case 1:
+            return DIAG_ACTION_SCAN_WIFI;
+        case 3:
+            return DIAG_ACTION_RECONNECT_WIFI;
+        case 4:
+            return DIAG_ACTION_RESET_WIFI_CONFIG;
+        default:
+            return DIAG_ACTION_NONE;
+        }
+    case DIAG_SCREEN_CONNECT:
+        return detail_index == 0 ? DIAG_ACTION_SCAN_WIFI : DIAG_ACTION_NONE;
+    case DIAG_SCREEN_BRIDGE:
+        return detail_index == 4 ? DIAG_ACTION_RESTART_BRIDGE : DIAG_ACTION_NONE;
+    case DIAG_SCREEN_CONFIG:
+        return detail_index == 0 ? DIAG_ACTION_RESET_WIFI_CONFIG : DIAG_ACTION_NONE;
+    case DIAG_SCREEN_ACTIONS:
+        switch (detail_index) {
+        case 0:
+            return DIAG_ACTION_RECONNECT_WIFI;
+        case 1:
+            return DIAG_ACTION_RESTART_BRIDGE;
+        case 2:
+            return DIAG_ACTION_RESTART_ESP;
+        case 3:
+            return DIAG_ACTION_BOOTLOADER;
+        case 4:
+            return DIAG_ACTION_RESET_WIFI_CONFIG;
+        case 5:
+            return DIAG_ACTION_FACTORY_RESET;
+        default:
+            return DIAG_ACTION_NONE;
+        }
     default:
         return DIAG_ACTION_NONE;
     }
 }
 
+static bool action_requires_confirm(diag_action_t action)
+{
+    switch (action) {
+    case DIAG_ACTION_SCAN_WIFI:
+    case DIAG_ACTION_RECONNECT_WIFI:
+        return false;
+    case DIAG_ACTION_RESTART_BRIDGE:
+    case DIAG_ACTION_RESTART_ESP:
+    case DIAG_ACTION_BOOTLOADER:
+    case DIAG_ACTION_RESET_WIFI_CONFIG:
+    case DIAG_ACTION_FACTORY_RESET:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static void handle_action_confirm(diag_input_state_t *state)
 {
-    diag_action_t action = action_from_detail_index(state->detail_index);
+    diag_action_t action = action_from_detail(state->screen, state->detail_index);
 
     if (action == DIAG_ACTION_NONE) {
         return;
     }
 
-    if (state->action_confirm_armed) {
+    if (!action_requires_confirm(action)) {
+        state->action_requested = action;
+    } else if (state->action_confirm_armed) {
         state->action_confirm_armed = false;
         state->action_requested = action;
     } else {
@@ -279,9 +326,7 @@ void diag_input_poll(diag_input_state_t *state)
         if (state->menu_open) {
             select_menu_item(state);
         } else if (state->screen_from_menu) {
-            if (state->screen == DIAG_SCREEN_ACTIONS) {
-                handle_action_confirm(state);
-            }
+            handle_action_confirm(state);
         } else {
             clear_action_confirm(state);
             state->screen_from_menu = false;

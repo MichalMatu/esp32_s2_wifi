@@ -10,9 +10,13 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs_flash.h"
 #include "sdkconfig.h"
 #include "soc/rtc_cntl_reg.h"
 #include "soc/soc.h"
+
+#include <stdio.h>
+#include <string.h>
 
 #if CONFIG_DIAG_OLED_ENABLED
 
@@ -60,13 +64,90 @@ static void oled_render_runtime(void)
     }
 }
 
+static void set_scan_running(bool running, int error)
+{
+    portENTER_CRITICAL(&s_state_lock);
+    s_state.wifi_scan_running = running;
+    s_state.wifi_scan_error = error;
+    if (running) {
+        s_state.wifi_scan_count = 0;
+        s_state.wifi_scan_total = 0;
+    }
+    portEXIT_CRITICAL(&s_state_lock);
+}
+
+static void publish_scan_results(const wifi_ap_record_t *records, uint16_t count, uint16_t total, int error)
+{
+    diag_wifi_scan_result_t results[DIAG_WIFI_SCAN_RESULTS] = {};
+
+    if (count > DIAG_WIFI_SCAN_RESULTS) {
+        count = DIAG_WIFI_SCAN_RESULTS;
+    }
+
+    for (uint16_t i = 0; i < count; i++) {
+        snprintf(results[i].ssid,
+                 sizeof(results[i].ssid),
+                 "%.32s",
+                 (const char *)records[i].ssid);
+        results[i].rssi = records[i].rssi;
+        results[i].channel = records[i].primary;
+        results[i].auth_mode = records[i].authmode;
+    }
+
+    portENTER_CRITICAL(&s_state_lock);
+    s_state.wifi_scan_running = false;
+    s_state.wifi_scan_error = error;
+    s_state.wifi_scan_count = count;
+    s_state.wifi_scan_total = total;
+    memcpy(s_state.wifi_scan_results, results, sizeof(s_state.wifi_scan_results));
+    portEXIT_CRITICAL(&s_state_lock);
+}
+
+static void scan_wifi(void)
+{
+    wifi_scan_config_t scan_config = {
+        .show_hidden = false,
+    };
+    wifi_ap_record_t records[DIAG_WIFI_SCAN_RESULTS] = {};
+    uint16_t total = 0;
+    uint16_t count = DIAG_WIFI_SCAN_RESULTS;
+
+    ESP_LOGI(TAG, "WiFi scan requested from OLED menu");
+    set_scan_running(true, 0);
+
+    esp_err_t err = esp_wifi_scan_start(&scan_config, true);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "WiFi scan failed: %s", esp_err_to_name(err));
+        publish_scan_results(records, 0, 0, err);
+        return;
+    }
+
+    esp_wifi_scan_get_ap_num(&total);
+    err = esp_wifi_scan_get_ap_records(&count, records);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "WiFi scan records failed: %s", esp_err_to_name(err));
+        publish_scan_results(records, 0, total, err);
+        return;
+    }
+
+    publish_scan_results(records, count, total, 0);
+}
+
 static void handle_action(diag_action_t action)
 {
     switch (action) {
+    case DIAG_ACTION_SCAN_WIFI:
+        scan_wifi();
+        break;
     case DIAG_ACTION_RECONNECT_WIFI:
         ESP_LOGI(TAG, "Reconnect WiFi requested from OLED menu");
         esp_wifi_disconnect();
         esp_wifi_connect();
+        break;
+    case DIAG_ACTION_RESTART_BRIDGE:
+        ESP_LOGW(TAG, "Bridge restart requested from OLED menu");
+        vTaskDelay(pdMS_TO_TICKS(250));
+        esp_restart();
         break;
     case DIAG_ACTION_RESTART_ESP:
         ESP_LOGW(TAG, "Restart requested from OLED menu");
@@ -77,6 +158,18 @@ static void handle_action(diag_action_t action)
         ESP_LOGW(TAG, "Bootloader requested from OLED menu");
         vTaskDelay(pdMS_TO_TICKS(250));
         REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+        esp_restart();
+        break;
+    case DIAG_ACTION_RESET_WIFI_CONFIG:
+        ESP_LOGW(TAG, "WiFi config reset requested from OLED menu");
+        esp_wifi_restore();
+        vTaskDelay(pdMS_TO_TICKS(250));
+        esp_restart();
+        break;
+    case DIAG_ACTION_FACTORY_RESET:
+        ESP_LOGW(TAG, "Factory reset requested from OLED menu");
+        nvs_flash_erase();
+        vTaskDelay(pdMS_TO_TICKS(250));
         esp_restart();
         break;
     default:

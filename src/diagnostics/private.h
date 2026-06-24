@@ -5,6 +5,9 @@
 
 #include "diagnostics.h"
 
+#define DIAG_WIFI_SCAN_RESULTS 5
+#define DIAG_WIFI_SSID_LEN 33
+
 typedef enum {
     DIAG_SCREEN_STATUS = 0,
     DIAG_SCREEN_WIFI,
@@ -38,10 +41,21 @@ typedef enum {
 
 typedef enum {
     DIAG_ACTION_NONE = 0,
+    DIAG_ACTION_SCAN_WIFI,
     DIAG_ACTION_RECONNECT_WIFI,
+    DIAG_ACTION_RESTART_BRIDGE,
     DIAG_ACTION_RESTART_ESP,
     DIAG_ACTION_BOOTLOADER,
+    DIAG_ACTION_RESET_WIFI_CONFIG,
+    DIAG_ACTION_FACTORY_RESET,
 } diag_action_t;
+
+typedef struct {
+    char ssid[DIAG_WIFI_SSID_LEN];
+    int8_t rssi;
+    uint8_t channel;
+    int auth_mode;
+} diag_wifi_scan_result_t;
 
 typedef struct {
     diag_mode_t mode;
@@ -50,6 +64,11 @@ typedef struct {
     uint64_t wifi_to_usb_bytes;
     uint32_t usb_to_wifi_packets;
     uint32_t wifi_to_usb_packets;
+    bool wifi_scan_running;
+    uint16_t wifi_scan_count;
+    uint16_t wifi_scan_total;
+    int wifi_scan_error;
+    diag_wifi_scan_result_t wifi_scan_results[DIAG_WIFI_SCAN_RESULTS];
 } diag_state_t;
 
 typedef struct {
