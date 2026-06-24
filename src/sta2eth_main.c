@@ -18,10 +18,45 @@
 #include "esp_private/wifi.h"
 #include "nvs_flash.h"
 #include "driver/gpio.h"
+#include "diagnostics.h"
 #include "provisioning.h"
 #include "wired_iface.h"
 
+#if CONFIG_APP_OLED_DEBUG_ONLY
+#include "tinyusb.h"
+#include "tusb_cdc_acm.h"
+#include "tusb_console.h"
+#endif
+
 static const char *TAG = "example_sta2wired";
+
+#if CONFIG_APP_OLED_DEBUG_ONLY
+
+void app_main(void)
+{
+    const tinyusb_config_t tusb_cfg = {
+        .external_phy = false,
+    };
+    const tinyusb_config_cdcacm_t acm_cfg = {
+        .usb_dev = TINYUSB_USBDEV_0,
+        .cdc_port = TINYUSB_CDC_ACM_0,
+    };
+
+    ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
+    ESP_ERROR_CHECK(tusb_cdc_acm_init(&acm_cfg));
+    ESP_ERROR_CHECK(esp_tusb_init_console(TINYUSB_CDC_ACM_0));
+
+    ESP_LOGI(TAG, "OLED debug mode: Wi-Fi bridge and USB NCM disabled");
+    diagnostics_start();
+    diagnostics_set_mode(DIAG_MODE_BOOT);
+
+    while (true) {
+        ESP_LOGI(TAG, "OLED debug alive");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+#else
 
 static EventGroupHandle_t s_event_flags;
 static bool s_wifi_is_connected = false;
@@ -42,6 +77,8 @@ static esp_err_t wired_recv_callback(void *buffer, uint16_t len, void *ctx)
         mac_spoof(FROM_WIRED, buffer, len, s_sta_mac);
         if (esp_wifi_internal_tx(ESP_IF_WIFI_STA, buffer, len) != ESP_OK) {
             ESP_LOGD(TAG, "Failed to send packet to WiFi!");
+        } else {
+            diagnostics_add_usb_to_wifi(len);
         }
     }
     return ESP_OK;
@@ -58,6 +95,8 @@ static esp_err_t wifi_recv_callback(void *buffer, uint16_t len, void *eb)
     if (wired_send(buffer, len, eb) != ESP_OK) {
         esp_wifi_internal_free_rx_buffer(eb);
         ESP_LOGD(TAG, "Failed to send packet to USB!");
+    } else {
+        diagnostics_add_wifi_to_usb(len);
     }
     return ESP_OK;
 }
@@ -68,6 +107,7 @@ static void event_handler(void *arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         ESP_LOGI(TAG, "Wi-Fi STA disconnected");
         s_wifi_is_connected = false;
+        diagnostics_set_wifi_connected(false);
         esp_wifi_internal_reg_rxcb(ESP_IF_WIFI_STA, NULL);
         esp_wifi_connect();
 
@@ -77,6 +117,7 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "Wi-Fi STA connected");
         esp_wifi_internal_reg_rxcb(ESP_IF_WIFI_STA, wifi_recv_callback);
         s_wifi_is_connected = true;
+        diagnostics_set_wifi_connected(true);
         xEventGroupClearBits(s_event_flags, DISCONNECTED_BIT);
         xEventGroupSetBits(s_event_flags, CONNECTED_BIT);
     }
@@ -175,11 +216,13 @@ void app_main(void)
     /* Init the re-provisioning button (long-press with initiate provisioning restart) */
     gpio_init();
     esp_read_mac(s_sta_mac, ESP_MAC_WIFI_STA);
+    diagnostics_start();
 
     /* Start the application in configuration mode (to perform provisioning)
      * or in a bridge mode (already provisioned) */
     if (do_provision || !is_provisioned()) {
         ESP_LOGI(TAG, "Starting provisioning");
+        diagnostics_set_mode(DIAG_MODE_CONFIG);
         ESP_ERROR_CHECK(esp_netif_init());
         // needed to complete provisioning with getting a valid IP event
         esp_netif_create_default_wifi_sta();
@@ -189,6 +232,7 @@ void app_main(void)
         start_provisioning(&s_event_flags, PROV_SUCCESS_BIT, PROV_FAIL_BIT);
     } else {
         ESP_LOGI(TAG, "Starting USB-WiFi bridge");
+        diagnostics_set_mode(DIAG_MODE_BRIDGE);
         if (connect_wifi() != ESP_OK) {
             // if we cannot connect to WiFi we just try to re-provision
             xEventGroupSetBits(s_event_flags, RECONFIGURE_BIT);
@@ -210,3 +254,5 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(1000));    // to let httpd handle the closure
     esp_restart();
 }
+
+#endif

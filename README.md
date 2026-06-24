@@ -86,6 +86,29 @@ router Wi-Fi -> ESP32-S2 -> USB -> MacBook
 - ESP32-S2 pojawia sie jako USB Ethernet/NCM.
 - W macOS nie bedzie widoczny jako karta Wi-Fi.
 
+## OLED diagnostyczny
+
+Obslugiwany modul: `OLED 1.3" SH1106 I2C + EC11 + BACK + CONFIRM`.
+
+Domyslne piny:
+
+| Modul | GPIO |
+| --- | --- |
+| SDA | 39 |
+| SCL | 37 |
+| EC11 A / TRA | 33 |
+| EC11 B / TRB | 18 |
+| EC11 PUSH / PSH / CONFIRM | 35 |
+| BACK / BAK | 16 |
+| VCC | 3V3 |
+| GND | GND |
+
+- I2C adres: `0x3C`.
+- Enkoder/BACK/CONFIRM zmieniaja ekran diagnostyki.
+- Ekrany: status Wi-Fi, ruch USB/Wi-Fi, system.
+- Monitor pokazuje, czy OLED odpowiada na I2C.
+- Piny mozna zmienic w `sdkconfig.defaults`.
+
 ## Drugi ESP32 jako AP
 
 ESP32-S2 moze polaczyc MacBooka z drugim ESP32 w trybie AP:

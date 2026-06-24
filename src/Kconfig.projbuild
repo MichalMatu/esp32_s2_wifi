@@ -2,6 +2,13 @@ menu "Example Configuration"
 
     orsource "$IDF_PATH/examples/common_components/env_caps/$IDF_TARGET/Kconfig.env_caps"
 
+    config APP_OLED_DEBUG_ONLY
+        bool "Run OLED debug only"
+        default y
+        help
+            Disable Wi-Fi bridge and USB NCM so the USB port can be used as a
+            TinyUSB CDC serial monitor while debugging the OLED.
+
     config EXAMPLE_RECONFIGURE_BUTTON
         int "Button for switching to reconfigure mode"
         range ENV_GPIO_RANGE_MIN ENV_GPIO_IN_RANGE_MAX
@@ -10,5 +17,60 @@ menu "Example Configuration"
             The button on this GPIO is used to reset the board to
             the reconfiguration mode, i.e. to restart provisioning
             or manual configuration of Wi-Fi settings (ssid, password)
+
+    menu "OLED diagnostics"
+
+        config DIAG_OLED_ENABLED
+            bool "Enable SH1106 OLED diagnostics UI"
+            default y
+
+        config DIAG_OLED_I2C_ADDR
+            hex "SH1106 I2C address"
+            default 0x3C
+            depends on DIAG_OLED_ENABLED
+
+        config DIAG_OLED_SDA_GPIO
+            int "OLED SDA GPIO"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_IN_RANGE_MAX
+            default 39
+            depends on DIAG_OLED_ENABLED
+
+        config DIAG_OLED_SCL_GPIO
+            int "OLED SCL GPIO"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_IN_RANGE_MAX
+            default 37
+            depends on DIAG_OLED_ENABLED
+
+        config DIAG_ENCODER_A_GPIO
+            int "EC11 encoder A GPIO"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_IN_RANGE_MAX
+            default 33
+            depends on DIAG_OLED_ENABLED
+
+        config DIAG_ENCODER_B_GPIO
+            int "EC11 encoder B GPIO"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_IN_RANGE_MAX
+            default 18
+            depends on DIAG_OLED_ENABLED
+
+        config DIAG_BACK_GPIO
+            int "BACK button GPIO"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_IN_RANGE_MAX
+            default 16
+            depends on DIAG_OLED_ENABLED
+
+        config DIAG_CONFIRM_GPIO
+            int "CONFIRM button GPIO"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_IN_RANGE_MAX
+            default 35
+            depends on DIAG_OLED_ENABLED
+
+        config DIAG_OLED_UPDATE_MS
+            int "OLED refresh interval in ms"
+            default 1000
+            range 200 10000
+            depends on DIAG_OLED_ENABLED
+
+    endmenu
 
 endmenu
