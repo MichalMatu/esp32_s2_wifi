@@ -5,7 +5,14 @@
 
 #include "diagnostics.h"
 
-#define DIAG_PAGE_COUNT 3
+#define DIAG_SCREEN_COUNT 3
+#define DIAG_MENU_ITEM_COUNT 5
+
+typedef enum {
+    DIAG_SCREEN_STATUS = 0,
+    DIAG_SCREEN_TRAFFIC,
+    DIAG_SCREEN_SYSTEM,
+} diag_screen_t;
 
 typedef struct {
     diag_mode_t mode;
@@ -17,7 +24,10 @@ typedef struct {
 } diag_state_t;
 
 typedef struct {
-    int page;
+    diag_screen_t screen;
+    bool menu_open;
+    int menu_index;
+    uint32_t revision;
     int32_t encoder_position;
     uint32_t back_presses;
     uint32_t confirm_presses;

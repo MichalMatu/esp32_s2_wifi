@@ -60,7 +60,6 @@ static void draw_status(const diag_state_t *state)
     diag_oled_draw_text(4, 0, state->wifi_connected ? line : "CH:-");
     snprintf(line, sizeof(line), "SSID:%.15s", ssid);
     diag_oled_draw_text(5, 0, line);
-    diag_oled_draw_text(7, 0, "<B  OK>");
 }
 
 static void draw_traffic(const diag_state_t *state)
@@ -76,7 +75,6 @@ static void draw_traffic(const diag_state_t *state)
     diag_oled_draw_text(5, 0, line);
     snprintf(line, sizeof(line), "W2U PKT:%" PRIu32, state->wifi_to_usb_packets);
     diag_oled_draw_text(6, 0, line);
-    diag_oled_draw_text(7, 0, "<B  OK>");
 }
 
 static void draw_system(const diag_state_t *state)
@@ -95,7 +93,6 @@ static void draw_system(const diag_state_t *state)
     diag_oled_draw_text(4, 0, "USB:NCM");
     snprintf(line, sizeof(line), "I2C:%d/%d", CONFIG_DIAG_OLED_SDA_GPIO, CONFIG_DIAG_OLED_SCL_GPIO);
     diag_oled_draw_text(5, 0, line);
-    diag_oled_draw_text(7, 0, "<B  OK>");
 }
 
 static void draw_debug_status(const diag_input_state_t *input)
@@ -113,9 +110,40 @@ static void draw_debug_status(const diag_input_state_t *input)
     diag_oled_draw_text(4, 0, line);
     snprintf(line, sizeof(line), "BK:%d PSH:%d", input->back_level, input->confirm_level);
     diag_oled_draw_text(5, 0, line);
-    snprintf(line, sizeof(line), "PAGE:%d", input->page);
+    snprintf(line, sizeof(line), "SCR:%d", input->screen);
     diag_oled_draw_text(6, 0, line);
     diag_oled_draw_text(7, 0, "ROT PRESS TEST");
+}
+
+static const char *menu_item_name(int index)
+{
+    switch (index) {
+    case 0:
+        return "STATUS";
+    case 1:
+        return "TRAFFIC";
+    case 2:
+        return "SYSTEM";
+    case 3:
+        return "SCAN TODO";
+    case 4:
+        return "CONFIG TODO";
+    default:
+        return "?";
+    }
+}
+
+static void draw_menu(const diag_input_state_t *input)
+{
+    diag_oled_draw_text(0, 0, "MENU");
+
+    for (int index = 0; index < DIAG_MENU_ITEM_COUNT; index++) {
+        char line[24];
+        snprintf(line, sizeof(line), "%c %s", input->menu_index == index ? '>' : ' ', menu_item_name(index));
+        diag_oled_draw_text(index + 1, 0, line);
+    }
+
+    diag_oled_draw_text(7, 0, "OK ENTER  B BACK");
 }
 
 bool diag_ui_render(const diag_state_t *state, const diag_input_state_t *input)
@@ -124,11 +152,16 @@ bool diag_ui_render(const diag_state_t *state, const diag_input_state_t *input)
 #if CONFIG_APP_OLED_DEBUG_ONLY
     draw_debug_status(input);
 #else
-    switch (input->page) {
-    case 1:
+    if (input->menu_open) {
+        draw_menu(input);
+        return diag_oled_flush();
+    }
+
+    switch (input->screen) {
+    case DIAG_SCREEN_TRAFFIC:
         draw_traffic(state);
         break;
-    case 2:
+    case DIAG_SCREEN_SYSTEM:
         draw_system(state);
         break;
     default:
