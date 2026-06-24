@@ -49,6 +49,12 @@ http://wifi.settings
 4. Wpisz SSID i haslo do sieci Wi-Fi 2.4 GHz.
 5. Po zapisaniu ESP32-S2 zrestartuje sie i przejdzie w tryb bridge.
 
+W obecnym firmware:
+
+- konfiguracja SSID/hasla jest przez `http://wifi.settings`;
+- dziala tylko w trybie konfiguracji;
+- zeby wejsc ponownie w konfiguracje, przytrzymaj `BOOT` okolo 2 sekundy albo zrob tryb reprovision/reset konfiguracji, a potem otworz `http://wifi.settings`.
+
 ## Uzycie jako internet przez USB
 
 Po poprawnym polaczeniu z routerem MacBook powinien dostac adres IP z routera przez interfejs USB NCM.
@@ -58,6 +64,45 @@ Do testu wylacz Wi-Fi w MacBooku albo ustaw interfejs USB wyzej w kolejnosci usl
 ```text
 router Wi-Fi -> ESP32-S2 -> USB -> MacBook
 ```
+
+## Sprawdzenie dzialania
+
+- macOS powinien pokazac `Espressif Device`;
+- interfejs ma status `active`;
+- IP powinno przyjsc z routera, np. `192.168.0.14`;
+- test: wylacz Wi-Fi MacBooka i otworz strone.
+
+## Upload firmware
+
+- Wejdz ESP32-S2 w download mode.
+- Wybierz port `/dev/cu.usbmodem01`.
+- W PlatformIO strzalka w prawo oznacza upload.
+- Jesli w logu jest `Hash of data verified`, kod zostal wgrany.
+- Po uploadzie nacisnij `RESET/EN` bez trzymania `BOOT`.
+
+## Normalne zachowanie USB
+
+- Po starcie firmware port serial moze zniknac.
+- ESP32-S2 pojawia sie jako USB Ethernet/NCM.
+- W macOS nie bedzie widoczny jako karta Wi-Fi.
+
+## Drugi ESP32 jako AP
+
+ESP32-S2 moze polaczyc MacBooka z drugim ESP32 w trybie AP:
+
+```text
+ESP32 AP -> Wi-Fi -> ESP32-S2 -> USB -> MacBook
+```
+
+Menu drugiego ESP32 otwierasz po jego IP, np. `http://192.168.4.1` albo `http://192.168.0.16`.
+
+OTA drugiego ESP32 zadziala tylko wtedy, gdy drugi ESP32 ma OTA w swoim firmware.
+
+## Adresy i kolizje IP
+
+- `http://wifi.settings` sluzy tylko do konfiguracji ESP32-S2.
+- Menu drugiego urzadzenia otwierasz po jego IP.
+- Przy kolizji adresow trzeba zmienic adres/podsiec w firmware odpowiedniego urzadzenia.
 
 ## Reset konfiguracji
 
