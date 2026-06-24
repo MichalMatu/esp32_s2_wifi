@@ -12,7 +12,8 @@
 #if CONFIG_DIAG_OLED_ENABLED
 
 #define OLED_I2C_TIMEOUT_MS 100
-#define OLED_I2C_SPEED_HZ 100000
+#define OLED_I2C_SPEED_HZ 400000
+#define OLED_I2C_TX_PAYLOAD_BYTES DIAG_OLED_WIDTH
 
 static const char *TAG = "diagnostics_oled";
 
@@ -124,13 +125,13 @@ static const uint8_t *font_get(char c)
 
 static esp_err_t oled_write(uint8_t control, const uint8_t *data, size_t len)
 {
-    uint8_t buffer[17];
+    uint8_t buffer[OLED_I2C_TX_PAYLOAD_BYTES + 1];
     size_t offset = 0;
 
     while (offset < len) {
         size_t chunk = len - offset;
-        if (chunk > sizeof(buffer) - 1) {
-            chunk = sizeof(buffer) - 1;
+        if (chunk > OLED_I2C_TX_PAYLOAD_BYTES) {
+            chunk = OLED_I2C_TX_PAYLOAD_BYTES;
         }
         buffer[0] = control;
         memcpy(&buffer[1], &data[offset], chunk);
