@@ -37,6 +37,11 @@ static void mark_changed(diag_input_state_t *state)
     state->revision++;
 }
 
+static void clear_action_confirm(diag_input_state_t *state)
+{
+    state->action_confirm_armed = false;
+}
+
 static void change_screen(diag_input_state_t *state, int delta)
 {
     int screen = state->screen + delta;
@@ -47,6 +52,7 @@ static void change_screen(diag_input_state_t *state, int delta)
     }
     state->screen = screen;
     state->screen_from_menu = false;
+    clear_action_confirm(state);
     mark_changed(state);
 }
 
@@ -126,6 +132,7 @@ static diag_screen_t menu_group_to_screen(diag_menu_group_t group)
 
 static void select_menu_item(diag_input_state_t *state)
 {
+    clear_action_confirm(state);
     if (state->menu_level == DIAG_MENU_ROOT) {
         state->menu_group = (diag_menu_group_t)state->menu_index;
         state->menu_level = DIAG_MENU_SUBMENU;
@@ -135,8 +142,40 @@ static void select_menu_item(diag_input_state_t *state)
     }
 
     state->screen = menu_group_to_screen(state->menu_group);
+    state->detail_index = state->menu_index;
     state->menu_open = false;
     state->screen_from_menu = true;
+    mark_changed(state);
+}
+
+static diag_action_t action_from_detail_index(int detail_index)
+{
+    switch (detail_index) {
+    case 0:
+        return DIAG_ACTION_RECONNECT_WIFI;
+    case 2:
+        return DIAG_ACTION_RESTART_ESP;
+    case 3:
+        return DIAG_ACTION_BOOTLOADER;
+    default:
+        return DIAG_ACTION_NONE;
+    }
+}
+
+static void handle_action_confirm(diag_input_state_t *state)
+{
+    diag_action_t action = action_from_detail_index(state->detail_index);
+
+    if (action == DIAG_ACTION_NONE) {
+        return;
+    }
+
+    if (state->action_confirm_armed) {
+        state->action_confirm_armed = false;
+        state->action_requested = action;
+    } else {
+        state->action_confirm_armed = true;
+    }
     mark_changed(state);
 }
 
@@ -219,6 +258,7 @@ void diag_input_poll(diag_input_state_t *state)
     if (back_pressed) {
         state->back_presses++;
         if (state->menu_open) {
+            clear_action_confirm(state);
             if (state->menu_level == DIAG_MENU_SUBMENU) {
                 state->menu_level = DIAG_MENU_ROOT;
                 state->menu_index = state->menu_group;
@@ -227,6 +267,7 @@ void diag_input_poll(diag_input_state_t *state)
             }
             mark_changed(state);
         } else if (state->screen_from_menu) {
+            clear_action_confirm(state);
             state->screen_from_menu = false;
             state->menu_open = true;
             state->menu_level = DIAG_MENU_SUBMENU;
@@ -238,8 +279,11 @@ void diag_input_poll(diag_input_state_t *state)
         if (state->menu_open) {
             select_menu_item(state);
         } else if (state->screen_from_menu) {
-            /* Detail views opened from menu use BACK to return to their submenu. */
+            if (state->screen == DIAG_SCREEN_ACTIONS) {
+                handle_action_confirm(state);
+            }
         } else {
+            clear_action_confirm(state);
             state->screen_from_menu = false;
             state->menu_group = screen_to_menu_group(state->screen);
             state->menu_level = DIAG_MENU_ROOT;

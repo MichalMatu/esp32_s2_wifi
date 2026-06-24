@@ -36,6 +36,13 @@ typedef enum {
     DIAG_MENU_GROUP_COUNT,
 } diag_menu_group_t;
 
+typedef enum {
+    DIAG_ACTION_NONE = 0,
+    DIAG_ACTION_RECONNECT_WIFI,
+    DIAG_ACTION_RESTART_ESP,
+    DIAG_ACTION_BOOTLOADER,
+} diag_action_t;
+
 typedef struct {
     diag_mode_t mode;
     bool wifi_connected;
@@ -52,6 +59,9 @@ typedef struct {
     diag_menu_level_t menu_level;
     diag_menu_group_t menu_group;
     int menu_index;
+    int detail_index;
+    bool action_confirm_armed;
+    diag_action_t action_requested;
     uint32_t revision;
     int32_t encoder_position;
     uint32_t back_presses;

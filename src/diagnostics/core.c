@@ -5,10 +5,14 @@
 #include "diagnostics/private.h"
 #include "diagnostics/ui.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
+#include "soc/rtc_cntl_reg.h"
+#include "soc/soc.h"
 
 #if CONFIG_DIAG_OLED_ENABLED
 
@@ -56,6 +60,30 @@ static void oled_render_runtime(void)
     }
 }
 
+static void handle_action(diag_action_t action)
+{
+    switch (action) {
+    case DIAG_ACTION_RECONNECT_WIFI:
+        ESP_LOGI(TAG, "Reconnect WiFi requested from OLED menu");
+        esp_wifi_disconnect();
+        esp_wifi_connect();
+        break;
+    case DIAG_ACTION_RESTART_ESP:
+        ESP_LOGW(TAG, "Restart requested from OLED menu");
+        vTaskDelay(pdMS_TO_TICKS(250));
+        esp_restart();
+        break;
+    case DIAG_ACTION_BOOTLOADER:
+        ESP_LOGW(TAG, "Bootloader requested from OLED menu");
+        vTaskDelay(pdMS_TO_TICKS(250));
+        REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+        esp_restart();
+        break;
+    default:
+        break;
+    }
+}
+
 static void input_task(void *arg)
 {
     (void)arg;
@@ -65,9 +93,20 @@ static void input_task(void *arg)
     while (true) {
         diag_input_poll(&local_input);
 
+        diag_action_t requested_action = local_input.action_requested;
         portENTER_CRITICAL(&s_input_lock);
         s_input_state = local_input;
         portEXIT_CRITICAL(&s_input_lock);
+
+        if (requested_action != DIAG_ACTION_NONE) {
+            local_input.action_requested = DIAG_ACTION_NONE;
+            vTaskDelay(pdMS_TO_TICKS(250));
+            handle_action(requested_action);
+
+            portENTER_CRITICAL(&s_input_lock);
+            s_input_state = local_input;
+            portEXIT_CRITICAL(&s_input_lock);
+        }
 
         vTaskDelay(DIAG_INPUT_POLL_TICKS);
     }

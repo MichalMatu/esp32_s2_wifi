@@ -213,6 +213,298 @@ static void draw_about(void)
     diag_oled_draw_text(6, 0, line);
 }
 
+static void draw_message(const char *title, const char *line1, const char *line2, const char *line3)
+{
+    diag_oled_draw_text(0, 0, title);
+    if (line1) {
+        diag_oled_draw_text(2, 0, line1);
+    }
+    if (line2) {
+        diag_oled_draw_text(3, 0, line2);
+    }
+    if (line3) {
+        diag_oled_draw_text(5, 0, line3);
+    }
+}
+
+static void draw_status_detail(const diag_state_t *state, const diag_input_state_t *input)
+{
+    char line[32];
+    char uptime[16];
+
+    switch (input->detail_index) {
+    case 1:
+        draw_wifi(state);
+        break;
+    case 2:
+        diag_oled_draw_text(0, 0, "USB");
+        diag_oled_draw_text(1, 0, "LINK:NCM");
+        snprintf(line, sizeof(line), "U2W:%" PRIu32 " PKT", state->usb_to_wifi_packets);
+        diag_oled_draw_text(3, 0, line);
+        snprintf(line, sizeof(line), "W2U:%" PRIu32 " PKT", state->wifi_to_usb_packets);
+        diag_oled_draw_text(4, 0, line);
+        break;
+    case 3:
+        draw_traffic(state);
+        break;
+    case 4:
+        fmt_uptime(uptime, sizeof(uptime));
+        diag_oled_draw_text(0, 0, "SYSTEM");
+        snprintf(line, sizeof(line), "UP:%s", uptime);
+        diag_oled_draw_text(2, 0, line);
+        snprintf(line, sizeof(line), "HEAP:%" PRIu32, esp_get_free_heap_size());
+        diag_oled_draw_text(3, 0, line);
+        diag_oled_draw_text(4, 0, "USB:NCM");
+        snprintf(line, sizeof(line), "I2C:%d/%d", CONFIG_DIAG_OLED_SDA_GPIO, CONFIG_DIAG_OLED_SCL_GPIO);
+        diag_oled_draw_text(5, 0, line);
+        break;
+    default:
+        draw_status(state);
+        break;
+    }
+}
+
+static void draw_wifi_detail(const diag_state_t *state, const diag_input_state_t *input)
+{
+    wifi_config_t cfg = {};
+    char line[32];
+
+    switch (input->detail_index) {
+    case 1:
+        draw_message("SCAN NETWORKS", "SCAN ENGINE:TODO", "WILL PAUSE WIFI", "USE WEB FOR NOW");
+        break;
+    case 2:
+        diag_oled_draw_text(0, 0, "SAVED NETWORK");
+        if (esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK && cfg.sta.ssid[0] != 0) {
+            snprintf(line, sizeof(line), "SSID:%.15s", (const char *)cfg.sta.ssid);
+            diag_oled_draw_text(2, 0, line);
+            diag_oled_draw_text(3, 0, "PASSWORD:SAVED");
+        } else {
+            diag_oled_draw_text(2, 0, "SSID:-");
+            diag_oled_draw_text(3, 0, "PASSWORD:-");
+        }
+        break;
+    case 3:
+        draw_message("RECONNECT", "ACTION:TODO", "SAFE CONFIRM NEXT", NULL);
+        break;
+    case 4:
+        draw_message("FORGET NETWORK", "ACTION:TODO", "CONFIRM REQUIRED", NULL);
+        break;
+    default:
+        draw_wifi(state);
+        break;
+    }
+}
+
+static void draw_connect_detail(const diag_input_state_t *input)
+{
+    switch (input->detail_index) {
+    case 0:
+        draw_message("SELECT SSID", "SCAN LIST:TODO", "ENC PICK NETWORK", NULL);
+        break;
+    case 1:
+        draw_message("ENTER PASSWORD", "TEXT EDIT:TODO", "ENC CHAR PICK", "OK NEXT");
+        break;
+    case 2:
+        draw_message("SAVE+CONNECT", "ACTION:TODO", "NEEDS SSID/PASS", NULL);
+        break;
+    default:
+        draw_message("CONNECT ONCE", "ACTION:TODO", "NO SAVE MODE", NULL);
+        break;
+    }
+}
+
+static void draw_bridge_detail(const diag_state_t *state, const diag_input_state_t *input)
+{
+    switch (input->detail_index) {
+    case 1:
+        draw_message("USB LINK", "MODE:NCM", "MAC SPOOF:ON", "HOST:MACBOOK");
+        break;
+    case 2:
+        draw_message("IP CONFIG", "MODE:BRIDGE", "IP FROM ROUTER", "DHCP PASSTHRU");
+        break;
+    case 3:
+        draw_message("DNS/GATEWAY", "FROM ROUTER", "VISIBLE ON MAC", NULL);
+        break;
+    case 4:
+        draw_message("RESTART BRIDGE", "ACTION:TODO", "CONFIRM REQUIRED", NULL);
+        break;
+    default:
+        draw_bridge(state);
+        break;
+    }
+}
+
+static void draw_traffic_detail(const diag_state_t *state, const diag_input_state_t *input)
+{
+    char line[32];
+
+    switch (input->detail_index) {
+    case 1:
+        diag_oled_draw_text(0, 0, "USB TO WIFI");
+        snprintf(line, sizeof(line), "BYTES:%" PRIu64 "K", state->usb_to_wifi_bytes / 1024ULL);
+        diag_oled_draw_text(2, 0, line);
+        snprintf(line, sizeof(line), "PKT:%" PRIu32, state->usb_to_wifi_packets);
+        diag_oled_draw_text(3, 0, line);
+        break;
+    case 2:
+        diag_oled_draw_text(0, 0, "WIFI TO USB");
+        snprintf(line, sizeof(line), "BYTES:%" PRIu64 "K", state->wifi_to_usb_bytes / 1024ULL);
+        diag_oled_draw_text(2, 0, line);
+        snprintf(line, sizeof(line), "PKT:%" PRIu32, state->wifi_to_usb_packets);
+        diag_oled_draw_text(3, 0, line);
+        break;
+    case 3:
+        diag_oled_draw_text(0, 0, "PACKETS");
+        snprintf(line, sizeof(line), "U2W:%" PRIu32, state->usb_to_wifi_packets);
+        diag_oled_draw_text(2, 0, line);
+        snprintf(line, sizeof(line), "W2U:%" PRIu32, state->wifi_to_usb_packets);
+        diag_oled_draw_text(3, 0, line);
+        break;
+    default:
+        draw_traffic(state);
+        break;
+    }
+}
+
+static void draw_diagnostics_detail(const diag_state_t *state, const diag_input_state_t *input)
+{
+    wifi_ap_record_t ap = {};
+    char line[32];
+    char uptime[16];
+
+    switch (input->detail_index) {
+    case 0:
+        diag_oled_draw_text(0, 0, "SIGNAL/RSSI");
+        if (state->wifi_connected && esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            snprintf(line, sizeof(line), "RSSI:%d DBM", ap.rssi);
+            diag_oled_draw_text(2, 0, line);
+        } else {
+            diag_oled_draw_text(2, 0, "RSSI:-");
+        }
+        break;
+    case 1:
+        diag_oled_draw_text(0, 0, "CHANNEL");
+        if (state->wifi_connected && esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            snprintf(line, sizeof(line), "CH:%u", ap.primary);
+            diag_oled_draw_text(2, 0, line);
+        } else {
+            diag_oled_draw_text(2, 0, "CH:-");
+        }
+        break;
+    case 2:
+        diag_oled_draw_text(0, 0, "HEAP/RAM");
+        snprintf(line, sizeof(line), "FREE:%" PRIu32, esp_get_free_heap_size());
+        diag_oled_draw_text(2, 0, line);
+        snprintf(line, sizeof(line), "MIN:%" PRIu32, esp_get_minimum_free_heap_size());
+        diag_oled_draw_text(3, 0, line);
+        break;
+    case 3:
+        fmt_uptime(uptime, sizeof(uptime));
+        diag_oled_draw_text(0, 0, "UPTIME");
+        snprintf(line, sizeof(line), "UP:%s", uptime);
+        diag_oled_draw_text(2, 0, line);
+        break;
+    case 4:
+        draw_message("LAST ERROR", "LOG BUFFER:TODO", "SERIAL FOR NOW", NULL);
+        break;
+    case 5:
+        diag_oled_draw_text(0, 0, "INPUT TEST");
+        snprintf(line, sizeof(line), "ENC:%" PRId32, input->encoder_position);
+        diag_oled_draw_text(2, 0, line);
+        snprintf(line, sizeof(line), "B:%" PRIu32 " OK:%" PRIu32,
+                 input->back_presses, input->confirm_presses);
+        diag_oled_draw_text(3, 0, line);
+        snprintf(line, sizeof(line), "A:%d B:%d", input->encoder_a_level, input->encoder_b_level);
+        diag_oled_draw_text(4, 0, line);
+        break;
+    case 6:
+        draw_message("OLED TEST", "I2C:400KHZ", "PAGE TX:128B", "DISPLAY:OK");
+        break;
+    default:
+        draw_diagnostics(state, input);
+        break;
+    }
+}
+
+static void draw_config_detail(const diag_input_state_t *input)
+{
+    switch (input->detail_index) {
+    case 0:
+        draw_message("CONFIG PORTAL", "URL:wifi.settings", "BOOT HOLD:2S", NULL);
+        break;
+    case 1:
+        draw_message("STA IP MODE", "CURRENT:DHCP", "STATIC:TODO", NULL);
+        break;
+    case 2:
+        draw_message("AP IP MODE", "CONFIG MODE", "CUSTOM IP:TODO", NULL);
+        break;
+    case 3:
+        draw_message("DEVICE NAME", "HOSTNAME:TODO", "OLED LABEL:TODO", NULL);
+        break;
+    case 4:
+        draw_message("OLED BRIGHT", "CONTRAST:TODO", "DIMMER:TODO", NULL);
+        break;
+    default:
+        draw_message("SCREEN TIMEOUT", "TIMEOUT:TODO", "ALWAYS ON NOW", NULL);
+        break;
+    }
+}
+
+static void draw_actions_detail(const diag_input_state_t *input)
+{
+    bool armed = input->action_confirm_armed;
+
+    switch (input->detail_index) {
+    case 0:
+        draw_message("RECONNECT WIFI", armed ? "OK AGAIN:RUN" : "OK ARM ACTION", "B CANCEL", NULL);
+        break;
+    case 1:
+        draw_message("RESTART BRIDGE", "ACTION:TODO", "SAFE STOP/START", NULL);
+        break;
+    case 2:
+        draw_message("RESTART ESP", armed ? "OK AGAIN:REBOOT" : "OK ARM ACTION", "B CANCEL", NULL);
+        break;
+    case 3:
+        draw_message("BOOTLOADER", armed ? "OK AGAIN:USB DL" : "OK ARM ACTION", "UPLOAD WITHOUT BOOT", NULL);
+        break;
+    case 4:
+        draw_message("RESET WIFI CFG", "ACTION:TODO", "CONFIRM REQUIRED", NULL);
+        break;
+    default:
+        draw_message("FACTORY RESET", "ACTION:TODO", "CONFIRM REQUIRED", NULL);
+        break;
+    }
+}
+
+static void draw_about_detail(const diag_input_state_t *input)
+{
+    uint8_t mac[6] = {};
+    char line[32];
+
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    switch (input->detail_index) {
+    case 0:
+        draw_message("FIRMWARE", "ESP32-S2 WIFI", "USB NCM BRIDGE", "OLED MENU");
+        break;
+    case 1:
+        draw_message("BUILD", "BRANCH:OLED", "FRAMEWORK:ESP-IDF", NULL);
+        break;
+    case 2:
+        diag_oled_draw_text(0, 0, "MAC ADDRESS");
+        snprintf(line, sizeof(line), "%02X:%02X:%02X",
+                 mac[0], mac[1], mac[2]);
+        diag_oled_draw_text(2, 0, line);
+        snprintf(line, sizeof(line), "%02X:%02X:%02X",
+                 mac[3], mac[4], mac[5]);
+        diag_oled_draw_text(3, 0, line);
+        break;
+    default:
+        draw_about();
+        break;
+    }
+}
+
 static void draw_debug_status(const diag_input_state_t *input)
 {
     char line[32];
@@ -427,6 +719,40 @@ bool diag_ui_render(const diag_state_t *state, const diag_input_state_t *input)
         return diag_oled_flush();
     }
 
+    if (input->screen_from_menu) {
+        switch (input->screen) {
+        case DIAG_SCREEN_WIFI:
+            draw_wifi_detail(state, input);
+            break;
+        case DIAG_SCREEN_CONNECT:
+            draw_connect_detail(input);
+            break;
+        case DIAG_SCREEN_BRIDGE:
+            draw_bridge_detail(state, input);
+            break;
+        case DIAG_SCREEN_TRAFFIC:
+            draw_traffic_detail(state, input);
+            break;
+        case DIAG_SCREEN_DIAGNOSTICS:
+            draw_diagnostics_detail(state, input);
+            break;
+        case DIAG_SCREEN_CONFIG:
+            draw_config_detail(input);
+            break;
+        case DIAG_SCREEN_ACTIONS:
+            draw_actions_detail(input);
+            break;
+        case DIAG_SCREEN_ABOUT:
+            draw_about_detail(input);
+            break;
+        default:
+            draw_status_detail(state, input);
+            break;
+        }
+        diag_oled_draw_text(7, 0, "B BACK");
+        return diag_oled_flush();
+    }
+
     switch (input->screen) {
     case DIAG_SCREEN_WIFI:
         draw_wifi(state);
@@ -455,9 +781,6 @@ bool diag_ui_render(const diag_state_t *state, const diag_input_state_t *input)
     default:
         draw_status(state);
         break;
-    }
-    if (input->screen_from_menu) {
-        diag_oled_draw_text(7, 0, "B BACK");
     }
 #endif
     return diag_oled_flush();
