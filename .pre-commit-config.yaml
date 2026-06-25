@@ -1,0 +1,38 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v19.1.7
+    hooks:
+      - id: clang-format
+        files: ^src/.*\.(c|h)$
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.1
+    hooks:
+      - id: codespell
+        files: ^(README\.md|src/.*\.(c|h)|platformio\.ini|sdkconfig\.defaults.*)$
+        args:
+          - --ignore-words-list=otworz,polaczenie,polaczeniu,haslo,hasla,uzywa,uzycie,wlacz,wylacz
+
+  - repo: local
+    hooks:
+      - id: pio-build
+        name: PlatformIO build
+        entry: pio run
+        language: system
+        pass_filenames: false
+        stages: [manual]
+      - id: cppcheck-src
+        name: cppcheck src
+        entry: sh scripts/quality.sh --static
+        language: system
+        pass_filenames: false
+        stages: [manual]

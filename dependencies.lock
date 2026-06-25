@@ -1,0 +1,59 @@
+dependencies:
+  dns_server:
+    dependencies: []
+    source:
+      path: /Users/michal/.platformio/packages/framework-espidf/examples/protocols/http_server/captive_portal/components/dns_server
+      type: local
+    version: '*'
+  espressif/esp_tinyusb:
+    component_hash: 6a50305bc61c7a361da8c0833642be824e92dacb0a6001719a832a4e96e471bf
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    - name: espressif/tinyusb
+      registry_url: https://components.espressif.com
+      require: public
+      version: '>=0.14.2'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.7.6~2
+  espressif/mdns:
+    component_hash: 291732b5df4d181eb75eba9042799a508c4c124503a0c0573132a0a48d2e3fbe
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.11.2
+  espressif/tinyusb:
+    component_hash: a40b7f67df6ac254a4afd96c6401cc56f2059ae747d6d7e66b568bca53ad0edc
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32p4
+    - esp32h4
+    - esp32s31
+    version: 0.19.0~3
+  idf:
+    source:
+      type: idf
+    version: 5.5.4
+direct_dependencies:
+- dns_server
+- espressif/esp_tinyusb
+- espressif/mdns
+- idf
+manifest_hash: 069c3ad749437a950b7f66f3882d14393e2981749af0702c640cd4a6f6d5d3b9
+target: esp32s2
+version: 2.0.0

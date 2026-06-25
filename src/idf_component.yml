@@ -1,0 +1,12 @@
+## IDF Component Manager Manifest File
+dependencies:
+  espressif/esp_tinyusb:
+    version: "^1.3.0"
+    rules:
+      - if: "idf_version >=4.4"
+      - if: "target in [esp32s2, esp32s3]"
+  espressif/mdns: "^1.11.2"
+  dns_server:
+    path: ${IDF_PATH}/examples/protocols/http_server/captive_portal/components/dns_server
+
+  idf: "^5.0"

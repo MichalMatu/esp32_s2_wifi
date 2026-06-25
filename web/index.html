@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>ESP32-S2 WiFi Bridge</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/src/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <div class="brand-mark">S2</div>
+          <div>
+            <h1>ESP32-S2 Bridge</h1>
+            <p>USB Wi-Fi control panel</p>
+          </div>
+        </div>
+
+        <nav class="nav-list" aria-label="Main navigation">
+          <button class="nav-item active" type="button" data-route="wifi" aria-current="page">
+            <span>Wi-Fi</span>
+            <small>Scan and connect</small>
+          </button>
+          <button class="nav-item" type="button" data-route="profiles">
+            <span>Profiles</span>
+            <small>Saved credentials</small>
+          </button>
+          <button class="nav-item" type="button" data-route="diagnostics">
+            <span>Diagnostics</span>
+            <small>Runtime data</small>
+          </button>
+          <button class="nav-item" type="button" data-route="settings">
+            <span>Settings</span>
+            <small>USB and LED</small>
+          </button>
+          <button class="nav-item" type="button" data-route="help">
+            <span>Help</span>
+            <small>Operating notes</small>
+          </button>
+        </nav>
+      </aside>
+
+      <main class="workspace">
+        <header class="workspace-header">
+          <div id="page-copy">
+            <h2 id="page-title">Wi-Fi</h2>
+            <p id="page-description">Scan nearby 2.4 GHz networks or enter credentials manually.</p>
+          </div>
+          <button class="secondary refresh-button" id="refresh-button" type="button">Refresh data</button>
+        </header>
+
+        <section class="view active" data-view="wifi">
+          <div class="page-grid">
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h3>Wi-Fi credentials</h3>
+                  <p>Select a scanned network or enter SSID manually.</p>
+                </div>
+              </div>
+              <form id="wifi-form" class="form-grid" autocomplete="off">
+                <label>
+                  <span>SSID</span>
+                  <input id="ssid" name="ssid" maxlength="32" autocomplete="username" required>
+                </label>
+                <label>
+                  <span>Password</span>
+                  <input id="password" name="password" type="password" maxlength="64" autocomplete="current-password">
+                </label>
+                <div class="form-actions">
+                  <button class="secondary" id="save-button" type="button">Save</button>
+                  <button class="primary" id="test-button" type="submit">Test</button>
+                  <button class="secondary" id="reconnect-button" type="button">Connect and restart</button>
+                </div>
+              </form>
+              <p class="warning">This setup page is not encrypted. Use it only on the direct USB link.</p>
+              <div class="notice" id="wifi-message" role="status" aria-live="polite" hidden></div>
+              <div id="wifi-connection-content" class="connection-content" hidden></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h3>Wi-Fi scan</h3>
+                  <p>Manual scan. Click a row to copy SSID into the form.</p>
+                </div>
+                <button class="secondary" id="scan-button" type="button">Scan</button>
+              </div>
+              <div id="scan-content" class="scroll-table scan-content">
+                <p class="muted">Click Scan to search nearby 2.4 GHz networks.</p>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" data-view="profiles" hidden>
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <h3>Saved networks</h3>
+                <p>Profiles stored on ESP32-S2. Connect directly or copy credentials into the Wi-Fi form.</p>
+              </div>
+              <label class="inline-check">
+                <input id="show-passwords" type="checkbox">
+                <span>Show passwords</span>
+              </label>
+            </div>
+            <div id="profiles-content" class="scroll-table profiles-content">
+              <p class="muted">Loading saved networks.</p>
+            </div>
+            <div class="notice" id="profiles-message" role="status" aria-live="polite" hidden></div>
+          </section>
+        </section>
+
+        <section class="view" data-view="diagnostics" hidden>
+          <div class="diagnostics-layout">
+            <section class="panel">
+              <h3>Network</h3>
+              <table>
+                <tbody id="network-table">
+                  <tr><th>Mode</th><td>Loading...</td></tr>
+                  <tr><th>USB</th><td>Loading...</td></tr>
+                  <tr><th>Config access</th><td>Loading...</td></tr>
+                  <tr><th>Host</th><td>Loading...</td></tr>
+                  <tr><th>Wi-Fi test</th><td>Loading...</td></tr>
+                  <tr><th>Wi-Fi message</th><td>Loading...</td></tr>
+                  <tr><th>LED mode</th><td>Loading...</td></tr>
+                  <tr><th>LED state</th><td>Loading...</td></tr>
+                </tbody>
+              </table>
+            </section>
+            <div class="diagnostics-summary">
+              <section class="panel">
+                <h3>System</h3>
+                <table>
+                  <tbody id="system-table">
+                    <tr><th>Runtime</th><td>Loading...</td></tr>
+                    <tr><th>CPU</th><td>Loading...</td></tr>
+                    <tr><th>Reset</th><td>Loading...</td></tr>
+                    <tr><th>ESP-IDF</th><td>Loading...</td></tr>
+                    <tr><th>Build</th><td>Loading...</td></tr>
+                  </tbody>
+                </table>
+              </section>
+              <section class="panel">
+                <h3>Memory</h3>
+                <table>
+                  <tbody id="memory-table">
+                    <tr><th>Free heap</th><td>Loading...</td></tr>
+                    <tr><th>Min free heap</th><td>Loading...</td></tr>
+                    <tr><th>Flash chip</th><td>Loading...</td></tr>
+                    <tr><th>App partition</th><td>Loading...</td></tr>
+                  </tbody>
+                </table>
+              </section>
+              <section class="panel">
+                <div class="panel-heading">
+                  <div>
+                    <h3>Core dump</h3>
+                    <p>Stored panic snapshot from flash.</p>
+                  </div>
+                </div>
+                <table>
+                  <tbody id="coredump-table">
+                    <tr><th>Enabled</th><td>Loading...</td></tr>
+                    <tr><th>Stored dump</th><td>Loading...</td></tr>
+                    <tr><th>Size</th><td>Loading...</td></tr>
+                  </tbody>
+                </table>
+                <div class="button-row">
+                  <a class="secondary button-link disabled" id="coredump-download" href="/api/coredump" download="esp32-s2-coredump.elf" aria-disabled="true" tabindex="-1">Download</a>
+                  <button class="secondary" id="coredump-erase" type="button" disabled>Erase</button>
+                </div>
+                <div class="notice" id="coredump-message" role="status" aria-live="polite" hidden></div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" data-view="settings" hidden>
+          <div class="page-grid two-column">
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h3>USB config access</h3>
+                  <p>Local only keeps Mac Wi-Fi online while the panel is open.</p>
+                </div>
+              </div>
+              <form id="config-form" class="setting-form">
+                <label>
+                  <span>Mode</span>
+                  <select id="config-access" name="config-access">
+                    <option value="local">Local only - keep Mac internet</option>
+                    <option value="captive">Captive portal - may take over internet</option>
+                  </select>
+                </label>
+                <button class="secondary" type="submit">Save mode</button>
+              </form>
+              <dl class="compact-list">
+                <div>
+                  <dt>Local only</dt>
+                  <dd>No gateway/DNS advertisement. Mac keeps normal internet route.</dd>
+                </div>
+                <div>
+                  <dt>Captive portal</dt>
+                  <dd>Enables wifi.settings, DNS and gateway. Use only when Mac internet can switch to ESP.</dd>
+                </div>
+              </dl>
+              <div class="notice" id="config-message" role="status" aria-live="polite" hidden></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h3>Status LED</h3>
+                  <p>Blue GPIO15 LED behavior.</p>
+                </div>
+              </div>
+              <form id="led-form" class="setting-form">
+                <label>
+                  <span>LED mode</span>
+                  <select id="led-mode" name="led-mode">
+                    <option value="status">Status blink</option>
+                    <option value="on">On</option>
+                    <option value="off">Off</option>
+                    <option value="identify">Identify blink</option>
+                  </select>
+                </label>
+                <button class="secondary" type="submit">Apply</button>
+              </form>
+              <dl class="compact-list">
+                <div>
+                  <dt>Current state</dt>
+                  <dd id="led-state">loading</dd>
+                </div>
+                <div>
+                  <dt>Status mode</dt>
+                  <dd>Config, BOOT hold, reconnect and bridge states use blink patterns.</dd>
+                </div>
+              </dl>
+              <div class="notice" id="led-message" role="status" aria-live="polite" hidden></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" data-view="help" hidden>
+          <section class="panel help-panel">
+            <h3>How to use this page</h3>
+            <ol>
+              <li>Select Wi-Fi, scan nearby 2.4 GHz networks, or type the SSID manually.</li>
+              <li>Enter the password. Leave it empty for an open network.</li>
+              <li>Use Save to store credentials, Test to validate Wi-Fi, or Connect and restart to enter bridge mode.</li>
+              <li>Use Profiles later to connect with one click to a saved network.</li>
+              <li>To reopen configuration mode, hold BOOT until the LED blinks fast, then release and open http://wifi.local.</li>
+            </ol>
+          </section>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

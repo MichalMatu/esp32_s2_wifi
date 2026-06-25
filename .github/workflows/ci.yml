@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  firmware:
+    name: Firmware build and checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+
+      - name: Install markdownlint
+        run: npm install --global markdownlint-cli2@0.22.1
+
+      - name: Build firmware
+        run: pio run
+
+      - name: Static analysis
+        run: sh scripts/quality.sh --static

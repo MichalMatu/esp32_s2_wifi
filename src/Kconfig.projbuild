@@ -1,0 +1,21 @@
+menu "Example Configuration"
+
+    orsource "$IDF_PATH/examples/common_components/env_caps/$IDF_TARGET/Kconfig.env_caps"
+
+    config EXAMPLE_RECONFIGURE_BUTTON
+        int "Button for switching to reconfigure mode"
+        range ENV_GPIO_RANGE_MIN ENV_GPIO_IN_RANGE_MAX
+        default 0
+        help
+            The button on this GPIO is used to reset the board to
+            the reconfiguration mode, i.e. to restart provisioning
+            or manual configuration of Wi-Fi settings (ssid, password)
+
+    config STATUS_LED_GPIO
+        int "On-board status LED GPIO"
+        range ENV_GPIO_RANGE_MIN ENV_GPIO_IN_RANGE_MAX
+        default 15
+        help
+            LOLIN/WEMOS S2 Mini uses GPIO15 for the on-board blue status LED.
+
+endmenu

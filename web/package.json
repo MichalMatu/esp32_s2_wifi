@@ -1,0 +1,19 @@
+{
+  "name": "esp32-s2-wifi-config-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "style:check": "node scripts/check-styles.mjs",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "build": "npm run style:check && npm run check && vite build && node scripts/inline.mjs && node scripts/check-inline.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "jsdom": "^26.1.0",
+    "typescript": "5.9.2",
+    "vite": "^7.0.0",
+    "vitest": "^3.2.4"
+  }
+}
