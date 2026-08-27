@@ -1,6 +1,31 @@
 #!/usr/bin/env sh
 set -eu
 
+run_host_tests() {
+    cc_bin="${CC:-cc}"
+    if ! command -v "$cc_bin" >/dev/null 2>&1; then
+        echo "C compiler not installed: $cc_bin"
+        exit 1
+    fi
+
+    test_bin="$(mktemp "${TMPDIR:-/tmp}/esp32-s2-config-policy.XXXXXX")"
+    trap 'rm -f "$test_bin"' EXIT HUP INT TERM
+
+    "$cc_bin" \
+        -std=c11 \
+        -Wall \
+        -Wextra \
+        -Werror \
+        -pedantic \
+        -Isrc \
+        tests/config_access_policy_test.c \
+        src/config_access_policy.c \
+        -o "$test_bin"
+    "$test_bin"
+    rm -f "$test_bin"
+    trap - EXIT HUP INT TERM
+}
+
 run_cppcheck() {
     if command -v cppcheck >/dev/null 2>&1; then
         cppcheck_bin="cppcheck"
@@ -46,6 +71,7 @@ run_web_checks() {
 
 case "${1:-all}" in
     --static|static)
+        run_host_tests
         run_web_checks
         run_cppcheck
         run_markdownlint
@@ -60,6 +86,7 @@ case "${1:-all}" in
             echo "pre-commit not installed; skipping hook checks"
         fi
 
+        run_host_tests
         run_web_checks
         pio run
         run_cppcheck
