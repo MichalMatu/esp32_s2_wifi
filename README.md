@@ -127,13 +127,38 @@ Podstawowy build:
 pio run
 ```
 
-Statyczna analiza kodu z `src`:
+Po buildzie mozna niezaleznie sprawdzic zamrozony budzet statycznej RAM i flash:
+
+```sh
+python scripts/check_firmware_size.py
+```
+
+Budzet pochodzi z zielonego builda P2.2. Baseline to 46,860 B statycznej RAM i 1,140,916 B flash, a blokujace limity to odpowiednio 55,052 B i 1,173,684 B. Skrypt sprawdza tez, czy nie zmienila sie oczekiwana calkowita przestrzen board/partycji. Raport RAM z PlatformIO nie zastepuje runtime `Free heap` i `Min free heap`.
+
+Reprodukowalnosc frontendowego assetu firmware:
+
+```sh
+sh scripts/check_web_reproducible.sh
+```
+
+Check wymaga `web/package-lock.json`, instaluje zaleznosci przez `npm ci`, wykonuje dwa czyste buildy i porownuje wygenerowany `src/web_assets.h` bajt w bajt. Sam header pozostaje ignorowanym artefaktem builda.
+
+Statyczny zestaw jakosciowy:
 
 ```sh
 sh scripts/quality.sh --static
 ```
 
-Ten check uruchamia tez frontend: TypeScript, testy regresyjne i build assetu HTML.
+Dostepne sa tez osobne gate'y do szybkiej diagnozy:
+
+```sh
+sh scripts/quality.sh --host-tests
+sh scripts/quality.sh --web
+sh scripts/quality.sh --cppcheck
+sh scripts/quality.sh --markdown
+```
+
+`--web` uruchamia testy UI, blokuje krytyczne npm advisories i sprawdza reprodukowalnosc assetu. Obecne nizsze poziomy advisories pozostaja widoczne i sa aktualizowane przez reviewowane zmiany zaleznosci zamiast automatycznego `npm audit fix`.
 
 Pelny lokalny check:
 
@@ -148,12 +173,21 @@ pre-commit install
 pre-commit run --all-files
 ```
 
+Granice modulow po P2:
+
+- `config_access_policy.c/.h`: czysta polityka trybu dostepu, testowalna na hoscie;
+- `form_profile_policy.c/.h`: dependency-free decoding formularzy oraz bounded parsing/formatting indeksow profili;
+- `provisioning_http.c/.h`: HTTP body, form extraction i JSON/presentation boundary;
+- `manual_config.c`: runtime orchestration, Wi-Fi connection/scan state, endpoint registration, coredump i mDNS.
+
 Konfiguracje w repo:
 
 - `.clang-format` formatuje pliki C/H;
 - `.editorconfig` trzyma wspolne zasady edytora;
 - `.pre-commit-config.yaml` sprawdza whitespace, YAML, konflikty, literowki i format C/H;
-- GitHub Actions buduje firmware i uruchamia `cppcheck`.
+- GitHub Actions buduje firmware i pokazuje osobno resource budget, host tests, web reproducibility/audit, `cppcheck` oraz markdownlint.
+
+Szczegoly granic i progow P2 sa w [docs/P2_SCOPE.md](docs/P2_SCOPE.md).
 
 ## Strona konfiguracji
 
@@ -175,7 +209,7 @@ npm run check
 npm run test
 ```
 
-Build firmware generuje `src/web_assets.h` automatycznie przez `scripts/build_web.py`.
+Build firmware wymaga `web/package-lock.json`, instaluje brakujace zaleznosci przez `npm ci` i generuje `src/web_assets.h` automatycznie przez `scripts/build_web.py`. Determinizm tego kroku sprawdza `scripts/check_web_reproducible.sh`.
 
 Strona ma:
 
