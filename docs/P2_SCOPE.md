@@ -1,6 +1,12 @@
 # P2 scope: provisioning boundary and regression hardening
 
-P2 starts only after P1 is merged. Its goal is to reduce the risk and size of `manual_config.c` by extracting testable pure logic first, while preserving all current USB NCM, provisioning, Wi-Fi, storage, and HTTP behavior.
+P2 starts only after P1 is merged. Its goal is to reduce the risk and size of `manual_config.c` by extracting testable pure logic first, while preserving all current USB NCM, provisioning, Wi-Fi, storage, and HTTP behavior for valid requests.
+
+Current delivery status:
+
+- P2.1 is implemented in the dedicated form/profile policy PR;
+- P2.2 and P2.3 remain intentionally separate follow-up work;
+- malformed form input is now handled more strictly: encoded NUL (`%00`) is rejected because it cannot be represented safely in the C-string output without hiding a trailing suffix.
 
 ## P2.1 - Form and profile policy extraction
 
@@ -19,13 +25,17 @@ Required host tests:
 - `+` to space decoding;
 - valid `%xx` decoding with upper- and lower-case hex;
 - malformed and incomplete percent escapes;
+- encoded NUL rejection;
 - empty values and missing keys;
 - output-buffer exhaustion;
 - exact key matching and duplicate/adjacent fields;
 - valid profile indexes `0..WIFI_PROFILE_MAX-1`;
-- negative, non-numeric, overflow, and out-of-range indexes.
+- negative, signed, non-numeric, overflow, and out-of-range indexes;
+- bounded profile-index formatting and undersized output buffers.
 
 Acceptance criterion: remove the source-local `-Wno-error=format-truncation` exception from `manual_config.c` because the profile presentation helper has an explicit tested bound.
+
+P2.1 implementation uses `form_profile_policy.c/.h`. Public operations cover value extraction, bounded profile-index parsing, and bounded profile-index formatting. Hex and percent decoding remain private implementation details and are exercised through the public value-extraction contract.
 
 ## P2.2 - Thin HTTP handler boundary
 
@@ -81,7 +91,7 @@ P2 is complete when:
 1. the selected form/profile logic is in dependency-free modules with strict host tests;
 2. `manual_config.c` is measurably smaller and contains less pure parsing/presentation logic;
 3. the `format-truncation` compiler exception is removed;
-4. existing endpoint and config-mode behavior remains unchanged;
+4. existing endpoint and valid config-mode behavior remains unchanged;
 5. the full ESP32-S2 firmware build, host tests, frontend checks, cppcheck, and markdownlint are green;
 6. firmware size/resource regression checks are documented and enforced;
 7. README and architecture/quality notes describe the new module boundaries.
