@@ -40,5 +40,17 @@ jobs:
       - name: Build firmware
         run: pio run
 
-      - name: Host tests and static analysis
-        run: sh scripts/quality.sh --static
+      - name: Firmware resource budget
+        run: python scripts/check_firmware_size.py
+
+      - name: Host policy tests
+        run: sh scripts/quality.sh --host-tests
+
+      - name: Web reproducibility and dependency audit
+        run: sh scripts/quality.sh --web
+
+      - name: C static analysis
+        run: sh scripts/quality.sh --cppcheck
+
+      - name: Documentation lint
+        run: sh scripts/quality.sh --markdown
