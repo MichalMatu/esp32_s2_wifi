@@ -2,6 +2,7 @@ idf_component_register(SRCS sta2eth_main.c
                             usb_ncm_iface.c
                             manual_config.c
                             config_access.c
+                            config_access_policy.c
                             status_led.c
                             wifi_profiles.c
                             debug_console.c
