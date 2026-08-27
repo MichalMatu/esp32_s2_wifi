@@ -49,7 +49,7 @@ run_cppcheck() {
 
 run_markdownlint() {
     if command -v markdownlint-cli2 >/dev/null 2>&1; then
-        markdownlint-cli2 README.md
+        markdownlint-cli2 README.md docs/P1_QUALITY_NOTES.md docs/P2_SCOPE.md
     else
         echo "markdownlint-cli2 not installed; skipping markdown lint"
     fi
