@@ -1,0 +1,19 @@
+{
+  "environment": "esp32-s2-saola-1",
+  "baseline": {
+    "ram_bytes": 46860,
+    "flash_bytes": 1140916
+  },
+  "headroom": {
+    "ram_bytes": 8192,
+    "flash_bytes": 32768
+  },
+  "limits": {
+    "ram_bytes": 55052,
+    "flash_bytes": 1173684
+  },
+  "totals": {
+    "ram_bytes": 327680,
+    "flash_bytes": 1572864
+  }
+}
