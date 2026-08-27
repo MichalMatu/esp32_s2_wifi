@@ -6,7 +6,6 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "esp_check.h"
@@ -32,6 +31,7 @@
 
 #include "config_access.h"
 #include "dns_server.h"
+#include "form_profile_policy.h"
 #include "provisioning.h"
 #include "status_led.h"
 #include "web_assets.h"
@@ -487,90 +487,6 @@ static esp_err_t read_form_body(httpd_req_t *req, char *out, size_t out_len) {
     }
     out[received] = '\0';
     return ESP_OK;
-}
-
-static int hex_digit(char value) {
-    if (value >= '0' && value <= '9') {
-        return value - '0';
-    }
-    if (value >= 'a' && value <= 'f') {
-        return value - 'a' + 10;
-    }
-    if (value >= 'A' && value <= 'F') {
-        return value - 'A' + 10;
-    }
-    return -1;
-}
-
-static bool decode_form_component(const char *start, const char *end, char *out, size_t out_len) {
-    if (!start || !end || !out || out_len == 0 || end < start) {
-        return false;
-    }
-
-    size_t written = 0;
-    for (const char *cursor = start; cursor < end; cursor++) {
-        char decoded = *cursor;
-        if (*cursor == '+') {
-            decoded = ' ';
-        } else if (*cursor == '%') {
-            if (cursor + 2 >= end) {
-                return false;
-            }
-            int high = hex_digit(cursor[1]);
-            int low = hex_digit(cursor[2]);
-            if (high < 0 || low < 0) {
-                return false;
-            }
-            decoded = (char)((high << 4) | low);
-            cursor += 2;
-        }
-
-        if (written + 1 >= out_len) {
-            return false;
-        }
-        out[written++] = decoded;
-    }
-    out[written] = '\0';
-    return true;
-}
-
-static bool get_form_value(const char *form, const char *key, char *out, size_t out_len) {
-    if (!form || !key || !out || out_len == 0) {
-        return false;
-    }
-
-    size_t key_len = strlen(key);
-    const char *cursor = form;
-    while (*cursor) {
-        const char *field_end = strchr(cursor, '&');
-        if (!field_end) {
-            field_end = cursor + strlen(cursor);
-        }
-
-        const char *equals = memchr(cursor, '=', field_end - cursor);
-        if (equals && (size_t)(equals - cursor) == key_len && strncmp(cursor, key, key_len) == 0) {
-            return decode_form_component(equals + 1, field_end, out, out_len);
-        }
-
-        cursor = *field_end == '&' ? field_end + 1 : field_end;
-    }
-    return false;
-}
-
-static bool get_form_index(const char *form, const char *key, size_t *out) {
-    char value[8] = {};
-    if (!out || !get_form_value(form, key, value, sizeof(value)) || value[0] == '\0') {
-        return false;
-    }
-
-    char *end = NULL;
-    unsigned long parsed = strtoul(value, &end, 10);
-    if (!end || *end != '\0' || parsed >= WIFI_PROFILE_MAX) {
-        return false;
-    }
-
-    *out = (size_t)parsed;
-    return true;
 }
 
 static esp_err_t apply_wifi_credentials(const char *ssid, const char *password,
@@ -1360,12 +1276,15 @@ static esp_err_t profiles_handler(httpd_req_t *req) {
     ESP_RETURN_ON_ERROR(send_chunk(req, "{\"source\":\"device\",\"ok\":true,\"profiles\":["), TAG,
                         "Cannot send profiles JSON");
     for (size_t i = 0; i < profile_count; i++) {
-        char id[8];
+        char id[FORM_PROFILE_INDEX_TEXT_MAX];
         if (i > 0) {
             ESP_RETURN_ON_ERROR(send_chunk(req, ","), TAG, "Cannot send profile comma");
         }
         ESP_RETURN_ON_ERROR(send_chunk(req, "{\"id\":"), TAG, "Cannot send profile object");
-        snprintf(id, sizeof(id), "%u", (unsigned)i);
+        if (!form_profile_index_format(i, WIFI_PROFILE_MAX, id, sizeof(id))) {
+            ESP_LOGE(TAG, "Cannot format profile id %u", (unsigned)i);
+            return ESP_FAIL;
+        }
         ESP_RETURN_ON_ERROR(send_chunk(req, id), TAG, "Cannot send profile id");
         ESP_RETURN_ON_ERROR(send_chunk(req, ",\"ssid\":"), TAG, "Cannot send profile SSID key");
         ESP_RETURN_ON_ERROR(send_json_string(req, profiles[i].ssid), TAG,
@@ -1384,7 +1303,7 @@ static esp_err_t config_handler(httpd_req_t *req) {
     char form[FORM_BODY_MAX];
     char mode[12] = {};
     if (read_form_body(req, form, sizeof(form)) != ESP_OK ||
-        !get_form_value(form, "mode", mode, sizeof(mode))) {
+        !form_value_get(form, "mode", mode, sizeof(mode))) {
         return send_action_json(req, false, "Config access mode is required.");
     }
 
@@ -1407,7 +1326,7 @@ static esp_err_t led_handler(httpd_req_t *req) {
     char form[FORM_BODY_MAX];
     char mode[12] = {};
     if (read_form_body(req, form, sizeof(form)) != ESP_OK ||
-        !get_form_value(form, "mode", mode, sizeof(mode))) {
+        !form_value_get(form, "mode", mode, sizeof(mode))) {
         return send_action_json(req, false, "LED mode is required.");
     }
 
@@ -1425,10 +1344,10 @@ static bool read_wifi_credentials_form(httpd_req_t *req, char *ssid, size_t ssid
     char form[FORM_BODY_MAX];
 
     if (read_form_body(req, form, sizeof(form)) != ESP_OK ||
-        !get_form_value(form, "ssid", ssid, ssid_len) || ssid[0] == '\0') {
+        !form_value_get(form, "ssid", ssid, ssid_len) || ssid[0] == '\0') {
         return false;
     }
-    get_form_value(form, "password", password, password_len);
+    (void)form_value_get(form, "password", password, password_len);
     return true;
 }
 
@@ -1492,7 +1411,7 @@ static esp_err_t profile_connect_handler(httpd_req_t *req) {
     wifi_profile_t profile = {};
 
     if (read_form_body(req, form, sizeof(form)) != ESP_OK ||
-        !get_form_index(form, "id", &profile_id)) {
+        !form_profile_index_get(form, "id", WIFI_PROFILE_MAX, &profile_id)) {
         return send_action_json(req, false, "Profile id is required.");
     }
 
@@ -1519,7 +1438,7 @@ static esp_err_t profile_delete_handler(httpd_req_t *req) {
     char form[FORM_BODY_MAX];
     size_t profile_id = 0;
     if (read_form_body(req, form, sizeof(form)) != ESP_OK ||
-        !get_form_index(form, "id", &profile_id)) {
+        !form_profile_index_get(form, "id", WIFI_PROFILE_MAX, &profile_id)) {
         return send_action_json(req, false, "Profile id is required.");
     }
 
