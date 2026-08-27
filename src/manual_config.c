@@ -31,14 +31,13 @@
 
 #include "config_access.h"
 #include "dns_server.h"
-#include "form_profile_policy.h"
 #include "provisioning.h"
+#include "provisioning_http.h"
 #include "status_led.h"
 #include "web_assets.h"
 #include "wifi_profiles.h"
 
 static const char *TAG = "NCM_configuration";
-#define FORM_BODY_MAX 512
 #define CONFIG_MDNS_HOSTNAME "wifi"
 #define CONFIG_MDNS_HOST_FQDN CONFIG_MDNS_HOSTNAME ".local"
 #define WIFI_CONNECT_TIMEOUT_MS 15000
@@ -330,126 +329,6 @@ static void sort_scan_records(wifi_ap_record_t *records, uint16_t count) {
     }
 }
 
-static esp_err_t send_chunk(httpd_req_t *req, const char *text) {
-    return httpd_resp_sendstr_chunk(req, text);
-}
-
-static esp_err_t send_json_string(httpd_req_t *req, const char *text) {
-    ESP_RETURN_ON_ERROR(send_chunk(req, "\""), TAG, "Cannot send JSON quote");
-
-    const char *start = text;
-    const unsigned char *cursor = (const unsigned char *)text;
-    while (*cursor) {
-        const char *replacement = NULL;
-        char unicode_escape[7];
-
-        switch (*cursor) {
-        case '\\':
-            replacement = "\\\\";
-            break;
-        case '"':
-            replacement = "\\\"";
-            break;
-        case '\b':
-            replacement = "\\b";
-            break;
-        case '\f':
-            replacement = "\\f";
-            break;
-        case '\n':
-            replacement = "\\n";
-            break;
-        case '\r':
-            replacement = "\\r";
-            break;
-        case '\t':
-            replacement = "\\t";
-            break;
-        default:
-            if (*cursor < 0x20) {
-                snprintf(unicode_escape, sizeof(unicode_escape), "\\u%04x", *cursor);
-                replacement = unicode_escape;
-            }
-            break;
-        }
-
-        if (replacement) {
-            const char *current = (const char *)cursor;
-            if (current > start) {
-                ESP_RETURN_ON_ERROR(httpd_resp_send_chunk(req, start, current - start), TAG,
-                                    "Cannot send JSON chunk");
-            }
-            ESP_RETURN_ON_ERROR(send_chunk(req, replacement), TAG, "Cannot send JSON escape");
-            cursor++;
-            start = (const char *)cursor;
-        } else {
-            cursor++;
-        }
-    }
-
-    if ((const char *)cursor > start) {
-        ESP_RETURN_ON_ERROR(httpd_resp_send_chunk(req, start, (const char *)cursor - start), TAG,
-                            "Cannot send JSON tail");
-    }
-    return send_chunk(req, "\"");
-}
-
-static esp_err_t send_json_field(httpd_req_t *req, const char *key, const char *value,
-                                 bool trailing_comma) {
-    ESP_RETURN_ON_ERROR(send_json_string(req, key), TAG, "Cannot send JSON key");
-    ESP_RETURN_ON_ERROR(send_chunk(req, ":"), TAG, "Cannot send JSON colon");
-    ESP_RETURN_ON_ERROR(send_json_string(req, value), TAG, "Cannot send JSON value");
-    if (trailing_comma) {
-        return send_chunk(req, ",");
-    }
-    return ESP_OK;
-}
-
-static esp_err_t send_json_bool_field(httpd_req_t *req, const char *key, bool value,
-                                      bool trailing_comma) {
-    ESP_RETURN_ON_ERROR(send_json_string(req, key), TAG, "Cannot send JSON key");
-    ESP_RETURN_ON_ERROR(send_chunk(req, value ? ":true" : ":false"), TAG, "Cannot send JSON bool");
-    if (trailing_comma) {
-        return send_chunk(req, ",");
-    }
-    return ESP_OK;
-}
-
-static esp_err_t send_json_uint_field(httpd_req_t *req, const char *key, uint32_t value,
-                                      bool trailing_comma) {
-    char text[16];
-    snprintf(text, sizeof(text), "%" PRIu32, value);
-    ESP_RETURN_ON_ERROR(send_json_string(req, key), TAG, "Cannot send JSON key");
-    ESP_RETURN_ON_ERROR(send_chunk(req, ":"), TAG, "Cannot send JSON colon");
-    ESP_RETURN_ON_ERROR(send_chunk(req, text), TAG, "Cannot send JSON uint");
-    if (trailing_comma) {
-        return send_chunk(req, ",");
-    }
-    return ESP_OK;
-}
-
-static esp_err_t send_json_nullable_int_field(httpd_req_t *req, const char *key, int value,
-                                              bool has_value, bool trailing_comma) {
-    ESP_RETURN_ON_ERROR(send_json_string(req, key), TAG, "Cannot send JSON key");
-    ESP_RETURN_ON_ERROR(send_chunk(req, ":"), TAG, "Cannot send JSON colon");
-    if (has_value) {
-        char text[16];
-        snprintf(text, sizeof(text), "%d", value);
-        ESP_RETURN_ON_ERROR(send_chunk(req, text), TAG, "Cannot send JSON int");
-    } else {
-        ESP_RETURN_ON_ERROR(send_chunk(req, "null"), TAG, "Cannot send JSON null");
-    }
-    if (trailing_comma) {
-        return send_chunk(req, ",");
-    }
-    return ESP_OK;
-}
-
-static void prepare_json_response(httpd_req_t *req) {
-    httpd_resp_set_type(req, "application/json; charset=utf-8");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-}
-
 static void load_core_dump_info(core_dump_info_t *info) {
     memset(info, 0, sizeof(*info));
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
@@ -467,26 +346,6 @@ static void load_core_dump_info(core_dump_info_t *info) {
 
     info->present = info->size > 0;
     format_bytes(info->size, info->size_text, sizeof(info->size_text));
-}
-
-static esp_err_t read_form_body(httpd_req_t *req, char *out, size_t out_len) {
-    if (!out || out_len == 0 || req->content_len == 0 || req->content_len >= out_len) {
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-    size_t received = 0;
-    while (received < req->content_len) {
-        int ret = httpd_req_recv(req, out + received, req->content_len - received);
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-            continue;
-        }
-        if (ret <= 0) {
-            return ESP_FAIL;
-        }
-        received += (size_t)ret;
-    }
-    out[received] = '\0';
-    return ESP_OK;
 }
 
 static esp_err_t apply_wifi_credentials(const char *ssid, const char *password,
@@ -793,50 +652,48 @@ static esp_err_t send_connection_object(httpd_req_t *req, const wifi_connect_sta
     bool has_rssi = status->got_ip || status->state == WIFI_CONNECT_STATE_SUCCEEDED;
     bool has_channel = status->channel != 0;
 
-    ESP_RETURN_ON_ERROR(send_chunk(req, "{\"ok\":"), TAG, "Cannot send connection JSON");
-    ESP_RETURN_ON_ERROR(send_chunk(req, ok ? "true," : "false,"), TAG, "Cannot send connection ok");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "state", wifi_connect_state_name(status->state), true),
-                        TAG, "Cannot send connection state");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "ssid", status->ssid, true), TAG,
-                        "Cannot send connection SSID");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "message", status->message, true), TAG,
-                        "Cannot send connection message");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "reason", status->reason, true), TAG,
-                        "Cannot send connection reason");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "ip", status->ip, true), TAG,
-                        "Cannot send connection IP");
-    ESP_RETURN_ON_ERROR(send_json_nullable_int_field(req, "rssi", status->rssi, has_rssi, true),
-                        TAG, "Cannot send connection RSSI");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "{\"ok\":"), TAG,
+                        "Cannot send connection JSON");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, ok ? "true," : "false,"), TAG,
+                        "Cannot send connection ok");
     ESP_RETURN_ON_ERROR(
-        send_json_nullable_int_field(req, "channel", status->channel, has_channel, true), TAG,
-        "Cannot send connection channel");
-    ESP_RETURN_ON_ERROR(send_json_uint_field(req, "elapsedMs", elapsed_ms, true), TAG,
-                        "Cannot send connection elapsed");
-    ESP_RETURN_ON_ERROR(send_json_bool_field(req, "bridgePending", status->bridge_pending, false),
+        provisioning_http_send_json_field(req, "state", wifi_connect_state_name(status->state), true),
+        TAG, "Cannot send connection state");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(req, "ssid", status->ssid, true), TAG,
+                        "Cannot send connection SSID");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(req, "message", status->message, true),
+                        TAG, "Cannot send connection message");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(req, "reason", status->reason, true), TAG,
+                        "Cannot send connection reason");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(req, "ip", status->ip, true), TAG,
+                        "Cannot send connection IP");
+    ESP_RETURN_ON_ERROR(
+        provisioning_http_send_json_nullable_int_field(req, "rssi", status->rssi, has_rssi, true),
+        TAG, "Cannot send connection RSSI");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_nullable_int_field(
+                            req, "channel", status->channel, has_channel, true),
+                        TAG, "Cannot send connection channel");
+    ESP_RETURN_ON_ERROR(
+        provisioning_http_send_json_uint_field(req, "elapsedMs", elapsed_ms, true), TAG,
+        "Cannot send connection elapsed");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_bool_field(
+                            req, "bridgePending", status->bridge_pending, false),
                         TAG, "Cannot send connection bridge state");
-    return send_chunk(req, "}");
+    return provisioning_http_send_chunk(req, "}");
 }
 
 static esp_err_t send_connection_response(httpd_req_t *req) {
     wifi_connect_status_t status;
     copy_connect_status(&status);
 
-    prepare_json_response(req);
-    ESP_RETURN_ON_ERROR(send_chunk(req, "{\"source\":\"device\","), TAG,
+    provisioning_http_prepare_json_response(req);
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "{\"source\":\"device\","), TAG,
                         "Cannot send connection response");
-    ESP_RETURN_ON_ERROR(send_chunk(req, "\"connection\":"), TAG, "Cannot send connection key");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "\"connection\":"), TAG,
+                        "Cannot send connection key");
     ESP_RETURN_ON_ERROR(send_connection_object(req, &status), TAG, "Cannot send connection object");
-    ESP_RETURN_ON_ERROR(send_chunk(req, "}"), TAG, "Cannot close connection response");
-    return httpd_resp_send_chunk(req, NULL, 0);
-}
-
-static esp_err_t send_action_json(httpd_req_t *req, bool ok, const char *message) {
-    prepare_json_response(req);
-    ESP_RETURN_ON_ERROR(send_chunk(req, "{\"ok\":"), TAG, "Cannot send action JSON");
-    ESP_RETURN_ON_ERROR(send_chunk(req, ok ? "true," : "false,"), TAG, "Cannot send action state");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "message", message, false), TAG,
-                        "Cannot send action message");
-    ESP_RETURN_ON_ERROR(send_chunk(req, "}"), TAG, "Cannot close action JSON");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "}"), TAG,
+                        "Cannot close connection response");
     return httpd_resp_send_chunk(req, NULL, 0);
 }
 
@@ -877,69 +734,85 @@ static esp_err_t status_handler(httpd_req_t *req) {
         strlcpy(app_size_text, "unknown", sizeof(app_size_text));
     }
 
-    prepare_json_response(req);
-    ESP_RETURN_ON_ERROR(send_chunk(req, "{\"source\":\"device\",\"system\":{"), TAG,
-                        "Cannot send status JSON");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "runtime", uptime, true), TAG, "Cannot send runtime");
+    provisioning_http_prepare_json_response(req);
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "{\"source\":\"device\",\"system\":{"),
+                        TAG, "Cannot send status JSON");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(req, "runtime", uptime, true), TAG,
+                        "Cannot send runtime");
     snprintf(value, sizeof(value), "%d MHz", esp_clk_cpu_freq() / 1000000);
-    ESP_RETURN_ON_ERROR(send_json_field(req, "cpu", value, true), TAG, "Cannot send CPU");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "reset", reset_reason_name(esp_reset_reason()), true),
-                        TAG, "Cannot send reset");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "idf", esp_get_idf_version(), true), TAG,
-                        "Cannot send IDF");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "build", __DATE__ " " __TIME__, false), TAG,
-                        "Cannot send build");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(req, "cpu", value, true), TAG,
+                        "Cannot send CPU");
+    ESP_RETURN_ON_ERROR(
+        provisioning_http_send_json_field(req, "reset", reset_reason_name(esp_reset_reason()), true),
+        TAG, "Cannot send reset");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(req, "idf", esp_get_idf_version(), true),
+                        TAG, "Cannot send IDF");
+    ESP_RETURN_ON_ERROR(
+        provisioning_http_send_json_field(req, "build", __DATE__ " " __TIME__, false), TAG,
+        "Cannot send build");
 
-    ESP_RETURN_ON_ERROR(send_chunk(req, "},\"memory\":{"), TAG, "Cannot send memory JSON");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "freeHeap", free_heap, true), TAG,
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "},\"memory\":{"), TAG,
+                        "Cannot send memory JSON");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(req, "freeHeap", free_heap, true), TAG,
                         "Cannot send free heap");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "minFreeHeap", min_heap, true), TAG,
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(req, "minFreeHeap", min_heap, true), TAG,
                         "Cannot send min heap");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "flashChip", flash_size_text, true), TAG,
-                        "Cannot send flash");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "appPartition", app_size_text, false), TAG,
-                        "Cannot send app partition");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(req, "flashChip", flash_size_text, true),
+                        TAG, "Cannot send flash");
+    ESP_RETURN_ON_ERROR(
+        provisioning_http_send_json_field(req, "appPartition", app_size_text, false), TAG,
+        "Cannot send app partition");
 
-    ESP_RETURN_ON_ERROR(send_chunk(req, "},\"coredump\":{"), TAG, "Cannot send coredump JSON");
-    ESP_RETURN_ON_ERROR(send_json_bool_field(req, "enabled", core_dump.enabled, true), TAG,
-                        "Cannot send coredump enabled");
-    ESP_RETURN_ON_ERROR(send_json_bool_field(req, "present", core_dump.present, true), TAG,
-                        "Cannot send coredump present");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "size", core_dump.size_text, true), TAG,
-                        "Cannot send coredump size");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "error", core_dump.error, false), TAG,
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "},\"coredump\":{"), TAG,
+                        "Cannot send coredump JSON");
+    ESP_RETURN_ON_ERROR(
+        provisioning_http_send_json_bool_field(req, "enabled", core_dump.enabled, true), TAG,
+        "Cannot send coredump enabled");
+    ESP_RETURN_ON_ERROR(
+        provisioning_http_send_json_bool_field(req, "present", core_dump.present, true), TAG,
+        "Cannot send coredump present");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(req, "size", core_dump.size_text, true),
+                        TAG, "Cannot send coredump size");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(req, "error", core_dump.error, false), TAG,
                         "Cannot send coredump error");
 
-    ESP_RETURN_ON_ERROR(send_chunk(req, "},\"network\":{"), TAG, "Cannot send network JSON");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "mode", "configuration", true), TAG,
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "},\"network\":{"), TAG,
+                        "Cannot send network JSON");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(req, "mode", "configuration", true), TAG,
                         "Cannot send mode");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "usb", "NCM config device", true), TAG,
-                        "Cannot send USB");
-    ESP_RETURN_ON_ERROR(
-        send_json_field(req, "configAccess", config_access_mode_label(s_active_access_mode), true),
-        TAG, "Cannot send config access");
-    ESP_RETURN_ON_ERROR(
-        send_json_field(req, "host", config_access_mode_host(s_active_access_mode), false), TAG,
-        "Cannot send host");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(req, "usb", "NCM config device", true),
+                        TAG, "Cannot send USB");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(
+                            req, "configAccess", config_access_mode_label(s_active_access_mode), true),
+                        TAG, "Cannot send config access");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(
+                            req, "host", config_access_mode_host(s_active_access_mode), false),
+                        TAG, "Cannot send host");
 
-    ESP_RETURN_ON_ERROR(send_chunk(req, "},\"config\":{"), TAG, "Cannot send config JSON");
-    ESP_RETURN_ON_ERROR(
-        send_json_field(req, "activeMode", config_access_mode_name(s_active_access_mode), true),
-        TAG, "Cannot send active mode");
-    ESP_RETURN_ON_ERROR(
-        send_json_field(req, "savedMode", config_access_mode_name(saved_access_mode), false), TAG,
-        "Cannot send saved mode");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "},\"config\":{"), TAG,
+                        "Cannot send config JSON");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(
+                            req, "activeMode", config_access_mode_name(s_active_access_mode), true),
+                        TAG, "Cannot send active mode");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(
+                            req, "savedMode", config_access_mode_name(saved_access_mode), false),
+                        TAG, "Cannot send saved mode");
 
-    ESP_RETURN_ON_ERROR(send_chunk(req, "},\"connection\":"), TAG, "Cannot send connection status");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "},\"connection\":"), TAG,
+                        "Cannot send connection status");
     ESP_RETURN_ON_ERROR(send_connection_object(req, &connect_status), TAG,
                         "Cannot send connection status object");
 
-    ESP_RETURN_ON_ERROR(send_chunk(req, ",\"led\":{"), TAG, "Cannot send LED JSON");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "mode", status_led_get_mode_name(led_mode), true), TAG,
-                        "Cannot send LED mode");
-    ESP_RETURN_ON_ERROR(send_json_field(req, "state", status_led_get_state_name(led_state), false),
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, ",\"led\":{"), TAG,
+                        "Cannot send LED JSON");
+    ESP_RETURN_ON_ERROR(
+        provisioning_http_send_json_field(req, "mode", status_led_get_mode_name(led_mode), true), TAG,
+        "Cannot send LED mode");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_json_field(
+                            req, "state", status_led_get_state_name(led_state), false),
                         TAG, "Cannot send LED state");
-    ESP_RETURN_ON_ERROR(send_chunk(req, "}}"), TAG, "Cannot close status JSON");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "}}"), TAG,
+                        "Cannot close status JSON");
     return httpd_resp_send_chunk(req, NULL, 0);
 }
 
@@ -949,7 +822,7 @@ static esp_err_t coredump_download_handler(httpd_req_t *req) {
 
     if (!info.present) {
         httpd_resp_set_status(req, "404 Not Found");
-        return send_action_json(req, false, "No core dump is stored in flash.");
+        return provisioning_http_send_action_json(req, false, "No core dump is stored in flash.");
     }
 
     const esp_partition_t *partition = esp_partition_find_first(
@@ -957,7 +830,7 @@ static esp_err_t coredump_download_handler(httpd_req_t *req) {
     if (!partition || info.address < partition->address ||
         info.address + info.size > partition->address + partition->size) {
         httpd_resp_set_status(req, "500 Internal Server Error");
-        return send_action_json(req, false, "Core dump partition is invalid.");
+        return provisioning_http_send_action_json(req, false, "Core dump partition is invalid.");
     }
 
     httpd_resp_set_type(req, "application/octet-stream");
@@ -989,9 +862,9 @@ static esp_err_t coredump_erase_handler(httpd_req_t *req) {
     esp_err_t ret = esp_core_dump_image_erase();
     if (ret != ESP_OK && ret != ESP_ERR_NOT_FOUND) {
         ESP_LOGE(TAG, "Core dump erase failed: %s", esp_err_to_name(ret));
-        return send_action_json(req, false, "Core dump erase failed.");
+        return provisioning_http_send_action_json(req, false, "Core dump erase failed.");
     }
-    return send_action_json(req, true, "Core dump erased.");
+    return provisioning_http_send_action_json(req, true, "Core dump erased.");
 }
 
 static void scan_done_handler(void *arg, esp_event_base_t event_base, int32_t event_id,
@@ -1044,14 +917,18 @@ static esp_err_t send_scan_snapshot(httpd_req_t *req) {
     char error[sizeof(s_scan_error)] = {};
 
     if (s_scan_snapshot_records == NULL) {
-        prepare_json_response(req);
-        ESP_RETURN_ON_ERROR(send_chunk(req,
-                                       "{\"source\":\"device\",\"ok\":false,\"state\":\"error\","
-                                       "\"total\":0,\"durationMs\":0,\"networks\":[],\"error\":"),
-                            TAG, "Cannot send scan no-memory response");
-        ESP_RETURN_ON_ERROR(send_json_string(req, "scan snapshot memory is unavailable"), TAG,
-                            "Cannot send scan no-memory message");
-        ESP_RETURN_ON_ERROR(send_chunk(req, "}"), TAG, "Cannot close scan no-memory response");
+        provisioning_http_prepare_json_response(req);
+        ESP_RETURN_ON_ERROR(
+            provisioning_http_send_chunk(req,
+                                         "{\"source\":\"device\",\"ok\":false,"
+                                         "\"state\":\"error\",\"total\":0,\"durationMs\":0,"
+                                         "\"networks\":[],\"error\":"),
+            TAG, "Cannot send scan no-memory response");
+        ESP_RETURN_ON_ERROR(
+            provisioning_http_send_json_string(req, "scan snapshot memory is unavailable"), TAG,
+            "Cannot send scan no-memory message");
+        ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "}"), TAG,
+                            "Cannot close scan no-memory response");
         return httpd_resp_send_chunk(req, NULL, 0);
     }
 
@@ -1073,21 +950,28 @@ static esp_err_t send_scan_snapshot(httpd_req_t *req) {
     }
 
     bool ok = state != PROVISIONING_SCAN_STATE_ERROR;
-    prepare_json_response(req);
-    ESP_RETURN_ON_ERROR(send_chunk(req, "{\"source\":\"device\",\"ok\":"), TAG,
+    provisioning_http_prepare_json_response(req);
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "{\"source\":\"device\",\"ok\":"), TAG,
                         "Cannot send scan JSON");
-    ESP_RETURN_ON_ERROR(send_chunk(req, ok ? "true" : "false"), TAG, "Cannot send scan ok");
-    ESP_RETURN_ON_ERROR(send_chunk(req, ",\"state\":"), TAG, "Cannot send scan state key");
-    ESP_RETURN_ON_ERROR(send_json_string(req, provisioning_scan_state_name(state)), TAG,
-                        "Cannot send scan state");
-    ESP_RETURN_ON_ERROR(send_chunk(req, ",\"total\":"), TAG, "Cannot send scan total key");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, ok ? "true" : "false"), TAG,
+                        "Cannot send scan ok");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, ",\"state\":"), TAG,
+                        "Cannot send scan state key");
+    ESP_RETURN_ON_ERROR(
+        provisioning_http_send_json_string(req, provisioning_scan_state_name(state)), TAG,
+        "Cannot send scan state");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, ",\"total\":"), TAG,
+                        "Cannot send scan total key");
     char number[16];
     snprintf(number, sizeof(number), "%u", total_count);
-    ESP_RETURN_ON_ERROR(send_chunk(req, number), TAG, "Cannot send scan total");
-    ESP_RETURN_ON_ERROR(send_chunk(req, ",\"durationMs\":"), TAG, "Cannot send scan duration key");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, number), TAG, "Cannot send scan total");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, ",\"durationMs\":"), TAG,
+                        "Cannot send scan duration key");
     snprintf(number, sizeof(number), "%" PRIu32, duration_ms);
-    ESP_RETURN_ON_ERROR(send_chunk(req, number), TAG, "Cannot send scan duration");
-    ESP_RETURN_ON_ERROR(send_chunk(req, ",\"networks\":["), TAG, "Cannot send network array");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, number), TAG,
+                        "Cannot send scan duration");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, ",\"networks\":["), TAG,
+                        "Cannot send network array");
 
     for (uint16_t i = 0; i < shown_count; i++) {
         char ssid[33];
@@ -1098,30 +982,41 @@ static esp_err_t send_scan_snapshot(httpd_req_t *req) {
         }
 
         if (i > 0) {
-            ESP_RETURN_ON_ERROR(send_chunk(req, ","), TAG, "Cannot send network comma");
+            ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, ","), TAG,
+                                "Cannot send network comma");
         }
-        ESP_RETURN_ON_ERROR(send_chunk(req, "{\"ssid\":"), TAG, "Cannot send network object");
-        ESP_RETURN_ON_ERROR(send_json_string(req, ssid), TAG, "Cannot send network SSID");
+        ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "{\"ssid\":"), TAG,
+                            "Cannot send network object");
+        ESP_RETURN_ON_ERROR(provisioning_http_send_json_string(req, ssid), TAG,
+                            "Cannot send network SSID");
         snprintf(number, sizeof(number), "%d", s_scan_snapshot_records[i].rssi);
-        ESP_RETURN_ON_ERROR(send_chunk(req, ",\"rssi\":"), TAG, "Cannot send RSSI key");
-        ESP_RETURN_ON_ERROR(send_chunk(req, number), TAG, "Cannot send RSSI");
-        ESP_RETURN_ON_ERROR(send_chunk(req, ",\"security\":"), TAG, "Cannot send security key");
-        ESP_RETURN_ON_ERROR(send_json_string(req, provisioning_wifi_auth_mode_name(
-                                                      s_scan_snapshot_records[i].authmode)),
+        ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, ",\"rssi\":"), TAG,
+                            "Cannot send RSSI key");
+        ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, number), TAG, "Cannot send RSSI");
+        ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, ",\"security\":"), TAG,
+                            "Cannot send security key");
+        ESP_RETURN_ON_ERROR(provisioning_http_send_json_string(
+                                req, provisioning_wifi_auth_mode_name(
+                                         s_scan_snapshot_records[i].authmode)),
                             TAG, "Cannot send security");
         snprintf(number, sizeof(number), "%u", s_scan_snapshot_records[i].primary);
-        ESP_RETURN_ON_ERROR(send_chunk(req, ",\"channel\":"), TAG, "Cannot send channel key");
-        ESP_RETURN_ON_ERROR(send_chunk(req, number), TAG, "Cannot send channel");
-        ESP_RETURN_ON_ERROR(send_chunk(req, "}"), TAG, "Cannot close network object");
+        ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, ",\"channel\":"), TAG,
+                            "Cannot send channel key");
+        ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, number), TAG,
+                            "Cannot send channel");
+        ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "}"), TAG,
+                            "Cannot close network object");
     }
 
-    ESP_RETURN_ON_ERROR(send_chunk(req, "]"), TAG, "Cannot close network array");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "]"), TAG,
+                        "Cannot close network array");
     if (!ok) {
-        ESP_RETURN_ON_ERROR(send_chunk(req, ",\"error\":"), TAG, "Cannot send scan error key");
-        ESP_RETURN_ON_ERROR(send_json_string(req, error[0] ? error : "scan failed"), TAG,
-                            "Cannot send scan error");
+        ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, ",\"error\":"), TAG,
+                            "Cannot send scan error key");
+        ESP_RETURN_ON_ERROR(provisioning_http_send_json_string(req, error[0] ? error : "scan failed"),
+                            TAG, "Cannot send scan error");
     }
-    ESP_RETURN_ON_ERROR(send_chunk(req, "}"), TAG, "Cannot close scan JSON");
+    ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "}"), TAG, "Cannot close scan JSON");
     return httpd_resp_send_chunk(req, NULL, 0);
 }
 
@@ -1252,16 +1147,6 @@ static esp_err_t scan_start_handler(httpd_req_t *req) {
     return send_scan_snapshot(req);
 }
 
-static esp_err_t profiles_error_json(httpd_req_t *req, const char *message) {
-    prepare_json_response(req);
-    ESP_RETURN_ON_ERROR(send_chunk(req, "{\"source\":\"device\",\"ok\":false,\"profiles\":[],"
-                                        "\"error\":"),
-                        TAG, "Cannot send profiles error");
-    ESP_RETURN_ON_ERROR(send_json_string(req, message), TAG, "Cannot send profiles error message");
-    ESP_RETURN_ON_ERROR(send_chunk(req, "}"), TAG, "Cannot close profiles error");
-    return httpd_resp_send_chunk(req, NULL, 0);
-}
-
 static esp_err_t profiles_handler(httpd_req_t *req) {
     import_current_wifi_config_as_profile();
 
@@ -1269,113 +1154,76 @@ static esp_err_t profiles_handler(httpd_req_t *req) {
     size_t profile_count = 0;
     esp_err_t ret = wifi_profiles_load(profiles, WIFI_PROFILE_MAX, &profile_count);
     if (ret != ESP_OK) {
-        return profiles_error_json(req, esp_err_to_name(ret));
+        return provisioning_http_send_profiles_error(req, esp_err_to_name(ret));
     }
 
-    prepare_json_response(req);
-    ESP_RETURN_ON_ERROR(send_chunk(req, "{\"source\":\"device\",\"ok\":true,\"profiles\":["), TAG,
-                        "Cannot send profiles JSON");
-    for (size_t i = 0; i < profile_count; i++) {
-        char id[FORM_PROFILE_INDEX_TEXT_MAX];
-        if (i > 0) {
-            ESP_RETURN_ON_ERROR(send_chunk(req, ","), TAG, "Cannot send profile comma");
-        }
-        ESP_RETURN_ON_ERROR(send_chunk(req, "{\"id\":"), TAG, "Cannot send profile object");
-        if (!form_profile_index_format(i, WIFI_PROFILE_MAX, id, sizeof(id))) {
-            ESP_LOGE(TAG, "Cannot format profile id %u", (unsigned)i);
-            return ESP_FAIL;
-        }
-        ESP_RETURN_ON_ERROR(send_chunk(req, id), TAG, "Cannot send profile id");
-        ESP_RETURN_ON_ERROR(send_chunk(req, ",\"ssid\":"), TAG, "Cannot send profile SSID key");
-        ESP_RETURN_ON_ERROR(send_json_string(req, profiles[i].ssid), TAG,
-                            "Cannot send profile SSID");
-        ESP_RETURN_ON_ERROR(send_chunk(req, ",\"password\":"), TAG,
-                            "Cannot send profile password key");
-        ESP_RETURN_ON_ERROR(send_json_string(req, profiles[i].password), TAG,
-                            "Cannot send profile password");
-        ESP_RETURN_ON_ERROR(send_chunk(req, "}"), TAG, "Cannot close profile object");
-    }
-    ESP_RETURN_ON_ERROR(send_chunk(req, "]}"), TAG, "Cannot close profiles JSON");
-    return httpd_resp_send_chunk(req, NULL, 0);
+    return provisioning_http_send_profiles(req, profiles, profile_count, WIFI_PROFILE_MAX);
 }
 
 static esp_err_t config_handler(httpd_req_t *req) {
-    char form[FORM_BODY_MAX];
     char mode[12] = {};
-    if (read_form_body(req, form, sizeof(form)) != ESP_OK ||
-        !form_value_get(form, "mode", mode, sizeof(mode))) {
-        return send_action_json(req, false, "Config access mode is required.");
+    if (!provisioning_http_read_form_value(req, "mode", mode, sizeof(mode))) {
+        return provisioning_http_send_action_json(req, false, "Config access mode is required.");
     }
 
     esp_err_t ret = config_access_set_mode_from_name(mode, true);
     if (ret != ESP_OK) {
-        return send_action_json(req, false, "Invalid config access mode.");
+        return provisioning_http_send_action_json(req, false, "Invalid config access mode.");
     }
 
     if (strcmp(mode, "captive") == 0) {
-        return send_action_json(
+        return provisioning_http_send_action_json(
             req, true,
             "Captive portal saved. It can route Mac traffic to ESP next time config mode starts.");
     }
 
-    return send_action_json(
+    return provisioning_http_send_action_json(
         req, true, "Local-only mode saved. Mac Wi-Fi stays online next time config mode starts.");
 }
 
 static esp_err_t led_handler(httpd_req_t *req) {
-    char form[FORM_BODY_MAX];
     char mode[12] = {};
-    if (read_form_body(req, form, sizeof(form)) != ESP_OK ||
-        !form_value_get(form, "mode", mode, sizeof(mode))) {
-        return send_action_json(req, false, "LED mode is required.");
+    if (!provisioning_http_read_form_value(req, "mode", mode, sizeof(mode))) {
+        return provisioning_http_send_action_json(req, false, "LED mode is required.");
     }
 
     bool save_mode = strcmp(mode, "identify") != 0;
     esp_err_t ret = status_led_set_mode_from_name(mode, save_mode);
     if (ret != ESP_OK) {
-        return send_action_json(req, false, "Invalid LED mode.");
+        return provisioning_http_send_action_json(req, false, "Invalid LED mode.");
     }
 
-    return send_action_json(req, true, "LED mode updated.");
-}
-
-static bool read_wifi_credentials_form(httpd_req_t *req, char *ssid, size_t ssid_len, char *password,
-                                       size_t password_len) {
-    char form[FORM_BODY_MAX];
-
-    if (read_form_body(req, form, sizeof(form)) != ESP_OK ||
-        !form_value_get(form, "ssid", ssid, ssid_len) || ssid[0] == '\0') {
-        return false;
-    }
-    (void)form_value_get(form, "password", password, password_len);
-    return true;
+    return provisioning_http_send_action_json(req, true, "LED mode updated.");
 }
 
 static esp_err_t save_wifi_handler(httpd_req_t *req) {
     char ssid[33] = {};
     char password[65] = {};
 
-    if (!read_wifi_credentials_form(req, ssid, sizeof(ssid), password, sizeof(password))) {
-        return send_action_json(req, false, "SSID is required.");
+    if (!provisioning_http_read_wifi_credentials(req, ssid, sizeof(ssid), password,
+                                                  sizeof(password))) {
+        return provisioning_http_send_action_json(req, false, "SSID is required.");
     }
 
     esp_err_t ret = persist_wifi_credentials(ssid, password);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to save Wi-Fi credentials for SSID %s: %s", ssid,
                  esp_err_to_name(ret));
-        return send_action_json(req, false, "Wi-Fi credentials could not be saved.");
+        return provisioning_http_send_action_json(req, false,
+                                                   "Wi-Fi credentials could not be saved.");
     }
 
     ESP_LOGI(TAG, "Wi-Fi credentials saved for SSID %s", ssid);
-    return send_action_json(req, true, "Wi-Fi credentials saved.");
+    return provisioning_http_send_action_json(req, true, "Wi-Fi credentials saved.");
 }
 
 static esp_err_t test_wifi_handler(httpd_req_t *req) {
     char ssid[33] = {};
     char password[65] = {};
 
-    if (!read_wifi_credentials_form(req, ssid, sizeof(ssid), password, sizeof(password))) {
-        return send_action_json(req, false, "SSID is required.");
+    if (!provisioning_http_read_wifi_credentials(req, ssid, sizeof(ssid), password,
+                                                  sizeof(password))) {
+        return provisioning_http_send_action_json(req, false, "SSID is required.");
     }
 
     esp_err_t ret = start_wifi_connection_attempt(ssid, password, WIFI_CONNECT_ACTION_TEST);
@@ -1391,8 +1239,9 @@ static esp_err_t reconnect_wifi_handler(httpd_req_t *req) {
     char ssid[33] = {};
     char password[65] = {};
 
-    if (!read_wifi_credentials_form(req, ssid, sizeof(ssid), password, sizeof(password))) {
-        return send_action_json(req, false, "SSID is required.");
+    if (!provisioning_http_read_wifi_credentials(req, ssid, sizeof(ssid), password,
+                                                  sizeof(password))) {
+        return provisioning_http_send_action_json(req, false, "SSID is required.");
     }
 
     esp_err_t ret = start_wifi_connection_attempt(ssid, password, WIFI_CONNECT_ACTION_RECONNECT);
@@ -1406,18 +1255,17 @@ static esp_err_t reconnect_wifi_handler(httpd_req_t *req) {
 }
 
 static esp_err_t profile_connect_handler(httpd_req_t *req) {
-    char form[FORM_BODY_MAX];
     size_t profile_id = 0;
     wifi_profile_t profile = {};
 
-    if (read_form_body(req, form, sizeof(form)) != ESP_OK ||
-        !form_profile_index_get(form, "id", WIFI_PROFILE_MAX, &profile_id)) {
-        return send_action_json(req, false, "Profile id is required.");
+    if (!provisioning_http_read_profile_index(req, "id", WIFI_PROFILE_MAX, &profile_id)) {
+        return provisioning_http_send_action_json(req, false, "Profile id is required.");
     }
 
     esp_err_t ret = wifi_profiles_get(profile_id, &profile);
     if (ret != ESP_OK) {
-        return send_action_json(req, false, "Saved Wi-Fi profile was not found.");
+        return provisioning_http_send_action_json(req, false,
+                                                   "Saved Wi-Fi profile was not found.");
     }
 
     ret = start_wifi_connection_attempt(profile.ssid, profile.password, WIFI_CONNECT_ACTION_RECONNECT);
@@ -1435,19 +1283,18 @@ static esp_err_t connect_status_handler(httpd_req_t *req) {
 }
 
 static esp_err_t profile_delete_handler(httpd_req_t *req) {
-    char form[FORM_BODY_MAX];
     size_t profile_id = 0;
-    if (read_form_body(req, form, sizeof(form)) != ESP_OK ||
-        !form_profile_index_get(form, "id", WIFI_PROFILE_MAX, &profile_id)) {
-        return send_action_json(req, false, "Profile id is required.");
+    if (!provisioning_http_read_profile_index(req, "id", WIFI_PROFILE_MAX, &profile_id)) {
+        return provisioning_http_send_action_json(req, false, "Profile id is required.");
     }
 
     esp_err_t ret = wifi_profiles_delete(profile_id);
     if (ret != ESP_OK) {
-        return send_action_json(req, false, "Saved Wi-Fi profile was not found.");
+        return provisioning_http_send_action_json(req, false,
+                                                   "Saved Wi-Fi profile was not found.");
     }
 
-    return send_action_json(req, true, "Saved profile removed.");
+    return provisioning_http_send_action_json(req, true, "Saved profile removed.");
 }
 
 static const httpd_uri_t root_uri = {
