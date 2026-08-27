@@ -36,6 +36,7 @@ run_host_tests() {
         tests/config_access_policy_test.c src/config_access_policy.c
     compile_and_run_host_test "$cc_bin" form-profile-policy \
         tests/form_profile_policy_test.c src/form_profile_policy.c
+    python3 tests/check_firmware_size_test.py
 }
 
 run_cppcheck() {
@@ -83,6 +84,21 @@ run_web_checks() {
     sh scripts/check_web_reproducible.sh --skip-install
 }
 
+run_build_and_budget() {
+    report_path=".pio/firmware-build.log"
+    mkdir -p .pio
+
+    if pio run >"$report_path" 2>&1; then
+        cat "$report_path"
+    else
+        status=$?
+        cat "$report_path"
+        return "$status"
+    fi
+
+    python scripts/check_firmware_size.py --report "$report_path"
+}
+
 run_static_checks() {
     run_host_tests
     run_web_checks
@@ -107,8 +123,7 @@ case "${1:-all}" in
         run_static_checks
         ;;
     --build|build)
-        pio run
-        python scripts/check_firmware_size.py
+        run_build_and_budget
         ;;
     all)
         if command -v pre-commit >/dev/null 2>&1; then
@@ -119,8 +134,7 @@ case "${1:-all}" in
 
         run_host_tests
         run_web_checks
-        pio run
-        python scripts/check_firmware_size.py
+        run_build_and_budget
         run_cppcheck
         run_markdownlint
         ;;
