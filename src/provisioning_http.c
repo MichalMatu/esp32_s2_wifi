@@ -14,10 +14,17 @@
 static const char *TAG = "provisioning_http";
 
 esp_err_t provisioning_http_send_chunk(httpd_req_t *req, const char *text) {
+    if (req == NULL || text == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
     return httpd_resp_sendstr_chunk(req, text);
 }
 
 esp_err_t provisioning_http_send_json_string(httpd_req_t *req, const char *text) {
+    if (req == NULL || text == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
     ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "\""), TAG, "Cannot send JSON quote");
 
     const char *start = text;
@@ -80,6 +87,9 @@ esp_err_t provisioning_http_send_json_string(httpd_req_t *req, const char *text)
 
 esp_err_t provisioning_http_send_json_field(httpd_req_t *req, const char *key, const char *value,
                                              bool trailing_comma) {
+    if (req == NULL || key == NULL || value == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
     ESP_RETURN_ON_ERROR(provisioning_http_send_json_string(req, key), TAG, "Cannot send JSON key");
     ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, ":"), TAG, "Cannot send JSON colon");
     ESP_RETURN_ON_ERROR(provisioning_http_send_json_string(req, value), TAG,
@@ -92,6 +102,9 @@ esp_err_t provisioning_http_send_json_field(httpd_req_t *req, const char *key, c
 
 esp_err_t provisioning_http_send_json_bool_field(httpd_req_t *req, const char *key, bool value,
                                                   bool trailing_comma) {
+    if (req == NULL || key == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
     ESP_RETURN_ON_ERROR(provisioning_http_send_json_string(req, key), TAG, "Cannot send JSON key");
     ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, value ? ":true" : ":false"), TAG,
                         "Cannot send JSON bool");
@@ -103,6 +116,9 @@ esp_err_t provisioning_http_send_json_bool_field(httpd_req_t *req, const char *k
 
 esp_err_t provisioning_http_send_json_uint_field(httpd_req_t *req, const char *key, uint32_t value,
                                                   bool trailing_comma) {
+    if (req == NULL || key == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
     char text[16];
     snprintf(text, sizeof(text), "%" PRIu32, value);
     ESP_RETURN_ON_ERROR(provisioning_http_send_json_string(req, key), TAG, "Cannot send JSON key");
@@ -117,6 +133,9 @@ esp_err_t provisioning_http_send_json_uint_field(httpd_req_t *req, const char *k
 esp_err_t provisioning_http_send_json_nullable_int_field(httpd_req_t *req, const char *key,
                                                           int value, bool has_value,
                                                           bool trailing_comma) {
+    if (req == NULL || key == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
     ESP_RETURN_ON_ERROR(provisioning_http_send_json_string(req, key), TAG, "Cannot send JSON key");
     ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, ":"), TAG, "Cannot send JSON colon");
     if (has_value) {
@@ -133,11 +152,17 @@ esp_err_t provisioning_http_send_json_nullable_int_field(httpd_req_t *req, const
 }
 
 void provisioning_http_prepare_json_response(httpd_req_t *req) {
+    if (req == NULL) {
+        return;
+    }
     httpd_resp_set_type(req, "application/json; charset=utf-8");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
 }
 
 esp_err_t provisioning_http_send_action_json(httpd_req_t *req, bool ok, const char *message) {
+    if (req == NULL || message == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
     provisioning_http_prepare_json_response(req);
     ESP_RETURN_ON_ERROR(provisioning_http_send_chunk(req, "{\"ok\":"), TAG,
                         "Cannot send action JSON");
@@ -150,6 +175,9 @@ esp_err_t provisioning_http_send_action_json(httpd_req_t *req, bool ok, const ch
 }
 
 esp_err_t provisioning_http_send_profiles_error(httpd_req_t *req, const char *message) {
+    if (req == NULL || message == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
     provisioning_http_prepare_json_response(req);
     ESP_RETURN_ON_ERROR(
         provisioning_http_send_chunk(req,
@@ -165,7 +193,8 @@ esp_err_t provisioning_http_send_profiles_error(httpd_req_t *req, const char *me
 
 esp_err_t provisioning_http_send_profiles(httpd_req_t *req, const wifi_profile_t *profiles,
                                             size_t profile_count, size_t max_profiles) {
-    if ((profile_count > 0 && profiles == NULL) || profile_count > max_profiles) {
+    if (req == NULL || max_profiles == 0 || (profile_count > 0 && profiles == NULL) ||
+        profile_count > max_profiles) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -225,6 +254,9 @@ static esp_err_t read_form_body(httpd_req_t *req, char *out, size_t out_len) {
 
 bool provisioning_http_read_form_value(httpd_req_t *req, const char *key, char *out,
                                         size_t out_len) {
+    if (req == NULL || key == NULL || out == NULL || out_len == 0) {
+        return false;
+    }
     char form[FORM_BODY_MAX];
     return read_form_body(req, form, sizeof(form)) == ESP_OK &&
            form_value_get(form, key, out, out_len);
@@ -232,6 +264,9 @@ bool provisioning_http_read_form_value(httpd_req_t *req, const char *key, char *
 
 bool provisioning_http_read_profile_index(httpd_req_t *req, const char *key,
                                            size_t upper_bound_exclusive, size_t *out) {
+    if (req == NULL || key == NULL || upper_bound_exclusive == 0 || out == NULL) {
+        return false;
+    }
     char form[FORM_BODY_MAX];
     return read_form_body(req, form, sizeof(form)) == ESP_OK &&
            form_profile_index_get(form, key, upper_bound_exclusive, out);
@@ -239,6 +274,10 @@ bool provisioning_http_read_profile_index(httpd_req_t *req, const char *key,
 
 bool provisioning_http_read_wifi_credentials(httpd_req_t *req, char *ssid, size_t ssid_len,
                                                char *password, size_t password_len) {
+    if (req == NULL || ssid == NULL || ssid_len == 0 || password == NULL || password_len == 0) {
+        return false;
+    }
+
     char form[FORM_BODY_MAX];
     if (read_form_body(req, form, sizeof(form)) != ESP_OK ||
         !form_value_get(form, "ssid", ssid, ssid_len) || ssid[0] == '\0') {
