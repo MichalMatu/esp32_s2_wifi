@@ -1,14 +1,13 @@
 #!/usr/bin/env sh
 set -eu
 
-run_host_tests() {
-    cc_bin="${CC:-cc}"
-    if ! command -v "$cc_bin" >/dev/null 2>&1; then
-        echo "C compiler not installed: $cc_bin"
-        exit 1
-    fi
+compile_and_run_host_test() {
+    cc_bin="$1"
+    test_name="$2"
+    test_source="$3"
+    policy_source="$4"
 
-    test_bin="$(mktemp "${TMPDIR:-/tmp}/esp32-s2-config-policy.XXXXXX")"
+    test_bin="$(mktemp "${TMPDIR:-/tmp}/esp32-s2-${test_name}.XXXXXX")"
     trap 'rm -f "$test_bin"' EXIT HUP INT TERM
 
     "$cc_bin" \
@@ -18,12 +17,25 @@ run_host_tests() {
         -Werror \
         -pedantic \
         -Isrc \
-        tests/config_access_policy_test.c \
-        src/config_access_policy.c \
+        "$test_source" \
+        "$policy_source" \
         -o "$test_bin"
     "$test_bin"
     rm -f "$test_bin"
     trap - EXIT HUP INT TERM
+}
+
+run_host_tests() {
+    cc_bin="${CC:-cc}"
+    if ! command -v "$cc_bin" >/dev/null 2>&1; then
+        echo "C compiler not installed: $cc_bin"
+        exit 1
+    fi
+
+    compile_and_run_host_test "$cc_bin" config-policy \
+        tests/config_access_policy_test.c src/config_access_policy.c
+    compile_and_run_host_test "$cc_bin" form-profile-policy \
+        tests/form_profile_policy_test.c src/form_profile_policy.c
 }
 
 run_cppcheck() {
