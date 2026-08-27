@@ -1,5 +1,3 @@
-#include <string.h>
-
 #include "esp_check.h"
 #include "nvs.h"
 
@@ -10,10 +8,6 @@
 #define CONFIG_ACCESS_SAFE_DEFAULT_KEY "safe_v1"
 
 static const char *TAG = "config_access";
-
-static bool mode_is_valid(config_access_mode_t mode) {
-    return mode >= CONFIG_ACCESS_MODE_LOCAL_ONLY && mode <= CONFIG_ACCESS_MODE_CAPTIVE;
-}
 
 static esp_err_t save_mode(nvs_handle_t nvs, config_access_mode_t mode) {
     esp_err_t ret = nvs_set_u8(nvs, CONFIG_ACCESS_MODE_KEY, (uint8_t)mode);
@@ -42,7 +36,7 @@ config_access_mode_t config_access_get_mode(void) {
     }
 
     if (nvs_get_u8(nvs, CONFIG_ACCESS_MODE_KEY, &value) != ESP_OK ||
-        !mode_is_valid((config_access_mode_t)value)) {
+        !config_access_mode_is_valid((config_access_mode_t)value)) {
         value = CONFIG_ACCESS_MODE_LOCAL_ONLY;
         if (save_mode(nvs, CONFIG_ACCESS_MODE_LOCAL_ONLY) == ESP_OK) {
             (void)nvs_commit(nvs);
@@ -54,7 +48,7 @@ config_access_mode_t config_access_get_mode(void) {
 }
 
 esp_err_t config_access_set_mode(config_access_mode_t mode, bool save) {
-    if (!mode_is_valid(mode)) {
+    if (!config_access_mode_is_valid(mode)) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -74,52 +68,9 @@ esp_err_t config_access_set_mode(config_access_mode_t mode, bool save) {
 }
 
 esp_err_t config_access_set_mode_from_name(const char *name, bool save) {
-    if (strcmp(name, "local") == 0) {
-        return config_access_set_mode(CONFIG_ACCESS_MODE_LOCAL_ONLY, save);
+    config_access_mode_t mode;
+    if (!config_access_mode_parse(name, &mode)) {
+        return ESP_ERR_INVALID_ARG;
     }
-    if (strcmp(name, "captive") == 0) {
-        return config_access_set_mode(CONFIG_ACCESS_MODE_CAPTIVE, save);
-    }
-
-    return ESP_ERR_INVALID_ARG;
-}
-
-bool config_access_mode_uses_gateway(config_access_mode_t mode) {
-    return mode == CONFIG_ACCESS_MODE_CAPTIVE;
-}
-
-bool config_access_mode_uses_dns(config_access_mode_t mode) {
-    return mode == CONFIG_ACCESS_MODE_CAPTIVE;
-}
-
-const char *config_access_mode_name(config_access_mode_t mode) {
-    switch (mode) {
-    case CONFIG_ACCESS_MODE_LOCAL_ONLY:
-        return "local";
-    case CONFIG_ACCESS_MODE_CAPTIVE:
-        return "captive";
-    default:
-        return "unknown";
-    }
-}
-
-const char *config_access_mode_label(config_access_mode_t mode) {
-    switch (mode) {
-    case CONFIG_ACCESS_MODE_LOCAL_ONLY:
-        return "Local only";
-    case CONFIG_ACCESS_MODE_CAPTIVE:
-        return "Captive portal";
-    default:
-        return "Unknown";
-    }
-}
-
-const char *config_access_mode_host(config_access_mode_t mode) {
-    switch (mode) {
-    case CONFIG_ACCESS_MODE_CAPTIVE:
-        return "wifi.local / wifi.settings / 192.168.4.1";
-    case CONFIG_ACCESS_MODE_LOCAL_ONLY:
-    default:
-        return "wifi.local / 192.168.4.1";
-    }
+    return config_access_set_mode(mode, save);
 }
