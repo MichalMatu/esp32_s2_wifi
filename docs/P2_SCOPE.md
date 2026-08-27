@@ -4,9 +4,10 @@ P2 starts only after P1 is merged. Its goal is to reduce the risk and size of `m
 
 Current delivery status:
 
-- P2.1 is implemented in the dedicated form/profile policy PR;
-- P2.2 and P2.3 remain intentionally separate follow-up work;
-- malformed form input is now handled more strictly: encoded NUL (`%00`) is rejected because it cannot be represented safely in the C-string output without hiding a trailing suffix.
+- P2.1 is merged: dependency-free form/profile policy with strict host tests;
+- P2.2 is implemented in a dedicated HTTP-boundary PR;
+- P2.3 remains intentionally separate follow-up work;
+- malformed form input is handled strictly: encoded NUL (`%00`) is rejected because it cannot be represented safely in the C-string output without hiding a trailing suffix.
 
 ## P2.1 - Form and profile policy extraction
 
@@ -41,21 +42,25 @@ P2.1 implementation uses `form_profile_policy.c/.h`. Public operations cover val
 
 Move HTTP/form presentation responsibilities out of `manual_config.c` without changing endpoint paths or response contracts.
 
-Preferred boundary:
+P2.2 implementation uses `provisioning_http.c/.h` for:
 
-- pure parsing/formatting helpers remain ESP-IDF-independent;
-- HTTP handlers own only request/response orchestration;
-- Wi-Fi lifecycle and connection state stay in their existing runtime layer until a separate change has tests for them;
-- NVS profile persistence stays in `wifi_profiles.c`.
-
-Candidate extraction targets:
-
+- JSON string escaping and typed field serialization;
 - common action JSON responses;
-- profile-list response formatting;
-- form credential parsing;
-- config-mode form parsing.
+- profile-list and profile-error response presentation;
+- bounded HTTP form-body reads;
+- config/LED form value extraction;
+- Wi-Fi credential extraction;
+- bounded profile-index extraction.
 
-Do not combine this with a USB NCM or Wi-Fi state-machine rewrite.
+The boundary intentionally leaves these responsibilities in `manual_config.c`:
+
+- Wi-Fi connection lifecycle and validation task state;
+- scan lifecycle, snapshots, sorting, and Wi-Fi API calls;
+- NVS/profile persistence calls;
+- endpoint registration and runtime orchestration;
+- coredump, mDNS, and USB-facing provisioning runtime behavior.
+
+This keeps P2.2 architectural rather than turning it into a Wi-Fi or USB state-machine rewrite. Existing endpoint paths and JSON schemas remain unchanged.
 
 ## P2.3 - Regression and resource gates
 
