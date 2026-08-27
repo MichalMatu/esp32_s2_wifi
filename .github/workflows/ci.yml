@@ -38,10 +38,14 @@ jobs:
         run: npm install --global markdownlint-cli2@0.22.1
 
       - name: Build firmware
-        run: pio run
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p .pio
+          pio run 2>&1 | tee .pio/firmware-build.log
 
       - name: Firmware resource budget
-        run: python scripts/check_firmware_size.py
+        run: python scripts/check_firmware_size.py --report .pio/firmware-build.log
 
       - name: Host policy tests
         run: sh scripts/quality.sh --host-tests
