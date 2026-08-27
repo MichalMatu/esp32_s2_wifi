@@ -21,12 +21,13 @@ P1 makes the build boundary explicit:
 - PlatformIO `espressif32` is pinned to `6.13.0`;
 - ESP-IDF is constrained to `5.5.3`;
 - `espressif/esp_tinyusb` is pinned to `1.7.6~2`;
+- its managed `espressif/tinyusb` dependency is pinned to `0.19.0~3`;
 - `espressif/mdns` is pinned to `1.11.2`;
 - the ESP-IDF `dns_server` example component is sourced from the `v5.5.3` Git tag and its exact subdirectory;
-- the stale machine-specific `dependencies.lock` is not tracked; the component manager resolves from the portable pinned manifest;
+- the stale machine-specific `dependencies.lock` is removed and ignored because it is generated from the portable pinned manifest;
 - frontend dependencies are installed from `web/package-lock.json` with `npm ci`.
 
-GitHub Actions uses `actions/checkout@v7.0.1` and `actions/setup-python@v7.0.0` so the workflow no longer depends on deprecated Node 20 action runtimes.
+GitHub Actions uses `actions/checkout@v7.0.1` and `actions/setup-python@v7.0.0`, an Ubuntu 24.04 runner, read-only repository permissions, a bounded job timeout, and concurrency cancellation for superseded runs.
 
 ## Compiler diagnostic exception
 
@@ -42,6 +43,6 @@ A merge-ready P1 must pass all of the following on a clean GitHub Actions runner
 - strict host C tests for config-access policy;
 - frontend TypeScript checks, regression tests, style checks, and production build;
 - `cppcheck` with warnings/style/performance/portability enabled;
-- `markdownlint`.
+- `markdownlint` for the README and P1/P2 engineering notes.
 
 This remains intentionally narrower than a wholesale split of `manual_config.c`. The next architectural step is specified separately in `docs/P2_SCOPE.md`.
