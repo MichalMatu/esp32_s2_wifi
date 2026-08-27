@@ -4,6 +4,7 @@ idf_component_register(SRCS sta2eth_main.c
                             config_access.c
                             config_access_policy.c
                             form_profile_policy.c
+                            provisioning_http.c
                             status_led.c
                             wifi_profiles.c
                             debug_console.c
