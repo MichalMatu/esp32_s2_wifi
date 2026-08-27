@@ -5,8 +5,8 @@ P2 starts only after P1 is merged. Its goal is to reduce the risk and size of `m
 Current delivery status:
 
 - P2.1 is merged: dependency-free form/profile policy with strict host tests;
-- P2.2 is implemented in a dedicated HTTP-boundary PR;
-- P2.3 remains intentionally separate follow-up work;
+- P2.2 is merged: provisioning HTTP/form/JSON boundary extracted from `manual_config.c`;
+- P2.3 is complete in the final P2 PR: explicit resource, reproducibility, dependency, and diagnosis gates;
 - malformed form input is handled strictly: encoded NUL (`%00`) is rejected because it cannot be represented safely in the C-string output without hiding a trailing suffix.
 
 ## P2.1 - Form and profile policy extraction
@@ -64,17 +64,60 @@ This keeps P2.2 architectural rather than turning it into a Wi-Fi or USB state-m
 
 ## P2.3 - Regression and resource gates
 
-Extend CI from functional compilation to explicit regression budgets.
+P2.3 turns the known-good P2.2 build into explicit regression budgets and makes frontend generation reproducible from the committed lockfile.
 
-Add:
+### Firmware resource budget
 
-- a firmware size check with documented flash/RAM headroom rather than an arbitrary percentage;
-- a repeatable command that records or validates PlatformIO size output;
-- dependency hygiene for the frontend lockfile, including review of current npm audit findings before making them blocking;
-- a check that generated web assets are reproducible from the committed frontend sources and lockfile;
-- host-test execution as a separately visible CI step if that improves failure diagnosis.
+The baseline comes from the green P2.2 build using PlatformIO 6.1.19, `espressif32 @ 6.13.0`, and ESP-IDF 5.5.3:
 
-Any budget must be derived from a known-good build and leave intentional headroom for ESP-IDF/toolchain variation.
+| Resource | P2.2 baseline | Explicit headroom | Blocking limit | Reported total |
+| --- | ---: | ---: | ---: | ---: |
+| Static RAM | 46,860 B | 8,192 B | 55,052 B | 327,680 B |
+| Flash | 1,140,916 B | 32,768 B | 1,173,684 B | 1,572,864 B |
+
+The previous green P2.1 build used 46,860 B RAM and 1,140,252 B flash, so the P2.2 HTTP-boundary extraction changed the linked image by 0 B RAM and +664 B flash before the budget was frozen.
+
+`scripts/firmware_size_budget.json` stores the baseline, headroom, limits, and expected totals. `scripts/check_firmware_size.py` parses the RAM/Flash summary from the same full PlatformIO build report, verifies that the board/partition totals have not silently changed, and fails when either absolute limit is exceeded. With `--report`, the check never triggers a second firmware build. Without `--report`, it runs one full build itself and evaluates that output.
+
+The parser has host-side regression tests for normal PlatformIO output, ANSI-colored output, comma-separated numbers, malformed reports, and budget overflow. `scripts/quality.sh --build` captures one firmware build report and reuses it for the resource check.
+
+The PlatformIO RAM number is the linked/static RAM footprint. It is not a runtime heap watermark. Runtime `Free heap` and `Min free heap` diagnostics remain necessary for dynamic-memory regressions.
+
+The limits are intentionally absolute rather than percentage based. Updating them requires a reviewed known-good build and an explicit explanation of why additional headroom is needed.
+
+### Reproducible frontend assets
+
+`web/package-lock.json` is mandatory. `scripts/build_web.py` no longer falls back to `npm install`; a clean firmware build installs frontend dependencies with `npm ci`.
+
+`scripts/check_web_reproducible.sh`:
+
+1. requires the committed lockfile;
+2. builds the frontend and captures generated `src/web_assets.h`;
+3. removes generated output;
+4. builds the same sources again with the same installed lockfile dependency set;
+5. compares the two generated headers byte for byte.
+
+`src/web_assets.h` remains ignored because it is generated build output. Reproducibility is therefore checked by regeneration rather than by comparing an ignored file with Git.
+
+### Dependency audit policy
+
+The green P2.2 CI run reported three npm audit findings: one low and two high. P2.3 does not hide those findings or apply an unreviewed `npm audit fix`.
+
+The web gate runs `npm audit --audit-level=critical`. A critical advisory is blocking immediately; lower-severity findings remain visible and must be handled through reviewed dependency updates that keep the UI/build regression checks green. This avoids turning an existing reviewed baseline into a permanently red pipeline while still preventing new critical exposure from passing silently.
+
+### Verification and diagnosis
+
+The aggregate quality command remains available locally, and each gate can be run independently:
+
+- firmware build plus resource budget: `sh scripts/quality.sh --build`;
+- strict host policy and resource-parser tests: `sh scripts/quality.sh --host-tests`;
+- web tests, dependency audit, and asset reproducibility: `sh scripts/quality.sh --web`;
+- C static analysis: `sh scripts/quality.sh --cppcheck`;
+- documentation lint: `sh scripts/quality.sh --markdown`;
+- aggregate static gate: `sh scripts/quality.sh --static`;
+- complete local gate: `sh scripts/quality.sh`.
+
+GitHub Actions mirrors these same gates when hosted CI capacity is available. The local commands are intentionally first-class so repository verification does not depend on hosted-runner availability.
 
 ## P2 non-goals
 
@@ -97,8 +140,8 @@ P2 is complete when:
 2. `manual_config.c` is measurably smaller and contains less pure parsing/presentation logic;
 3. the `format-truncation` compiler exception is removed;
 4. existing endpoint and valid config-mode behavior remains unchanged;
-5. the full ESP32-S2 firmware build, host tests, frontend checks, cppcheck, and markdownlint are green;
+5. firmware build, host tests, frontend checks, cppcheck, and markdownlint have equivalent reproducible local/CI commands;
 6. firmware size/resource regression checks are documented and enforced;
 7. README and architecture/quality notes describe the new module boundaries.
 
-P2 should be delivered as small reviewable commits (or separate PRs for P2.1, P2.2, and P2.3) rather than as one wholesale rewrite of `manual_config.c`.
+P2 is delivered as small reviewable changes rather than as one wholesale rewrite of `manual_config.c`.

@@ -5,6 +5,7 @@ Import("env")  # type: ignore[name-defined]
 
 ROOT = Path(env["PROJECT_DIR"])  # type: ignore[name-defined]
 WEB = ROOT / "web"
+LOCKFILE = WEB / "package-lock.json"
 
 
 def run(command):
@@ -12,10 +13,10 @@ def run(command):
 
 
 if WEB.exists():
+    if not LOCKFILE.exists():
+        raise RuntimeError("web/package-lock.json is required for reproducible firmware builds")
+
     if not (WEB / "node_modules").exists():
-        if (WEB / "package-lock.json").exists():
-            run(["npm", "ci"])
-        else:
-            run(["npm", "install"])
+        run(["npm", "ci"])
 
     run(["npm", "run", "build"])
