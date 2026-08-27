@@ -72,24 +72,43 @@ run_web_checks() {
         return
     fi
 
-    if [ -f web/package-lock.json ]; then
-        (cd web && npm ci)
-    else
-        (cd web && npm install)
+    if [ ! -f web/package-lock.json ]; then
+        echo "web/package-lock.json is required" >&2
+        exit 1
     fi
 
-    (cd web && npm run check && npm run test && npm run build)
+    (cd web && npm ci)
+    (cd web && npm run test)
+    (cd web && npm audit --audit-level=critical)
+    sh scripts/check_web_reproducible.sh --skip-install
+}
+
+run_static_checks() {
+    run_host_tests
+    run_web_checks
+    run_cppcheck
+    run_markdownlint
 }
 
 case "${1:-all}" in
-    --static|static)
+    --host-tests|host-tests)
         run_host_tests
+        ;;
+    --web|web)
         run_web_checks
+        ;;
+    --cppcheck|cppcheck)
         run_cppcheck
+        ;;
+    --markdown|markdown)
         run_markdownlint
+        ;;
+    --static|static)
+        run_static_checks
         ;;
     --build|build)
         pio run
+        python scripts/check_firmware_size.py
         ;;
     all)
         if command -v pre-commit >/dev/null 2>&1; then
@@ -101,11 +120,12 @@ case "${1:-all}" in
         run_host_tests
         run_web_checks
         pio run
+        python scripts/check_firmware_size.py
         run_cppcheck
         run_markdownlint
         ;;
     *)
-        echo "usage: sh scripts/quality.sh [--static|--build]"
+        echo "usage: sh scripts/quality.sh [--host-tests|--web|--cppcheck|--markdown|--static|--build]"
         exit 2
         ;;
 esac
